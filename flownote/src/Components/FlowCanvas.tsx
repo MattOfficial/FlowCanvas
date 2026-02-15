@@ -1,5 +1,12 @@
 import { useEffect, useRef } from "react";
 
+type Item = {
+  id: number;
+  x: number;
+  y: number;
+  color: string;
+};
+
 export const FlowCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reqIdRef = useRef<number>(0);
@@ -7,10 +14,18 @@ export const FlowCanvas = () => {
   // We start zoomed in (1.5x) and panned slightly (100px)
   const camera = useRef({ x: 100, y: 100, z: 1.5 });
 
-  // We track if we are dragging, where we started interacting, and where the camera was
+  // Refs to track camera drag
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const camStart = useRef({ x: 0, y: 0 });
+
+  // Tracking FPS
+  const lastFrameTime = useRef<number>(0);
+  const fps = useRef<number>(60);
+
+  // Holds array of items to stress test system
+  const items = useRef<Item[]>([]);
+
   useEffect(() => {
     const dpr = window.devicePixelRatio || 1;
 
@@ -94,9 +109,37 @@ export const FlowCanvas = () => {
       ctx.stroke();
     };
 
+    // Draw 1000 items
+    if (items.current.length === 0) {
+      const colors = [
+        "#ff5555",
+        "#55ff55",
+        "#5555ff",
+        "#ffff55",
+        "#ff55ff",
+        "#55ffff",
+      ];
+      for (let i = 0; i < 10000; i++) {
+        items.current.push({
+          id: i,
+          x: Math.random() * 4000 - 2000, // Random pos between -2000 and 2000
+          y: Math.random() * 4000 - 2000,
+          color: colors[Math.floor(Math.random() * colors.length)],
+        });
+      }
+    }
+
     // --- The Render Loop ---
-    const render = () => {
+    const render = (time: number) => {
       if (!ctx || !canvas) return;
+
+      const delta = time - lastFrameTime.current;
+      lastFrameTime.current = time;
+
+      // Simple moving average to smooth out the counter
+      // (90% old FPS + 10% new FPS)
+      const currentFPS = 1000 / Math.max(delta, 0.001);
+      fps.current = 0.9 * fps.current + 0.1 * currentFPS;
 
       // Reset to default identity matrix (scaled by dpr)
       // This undoes the camera transform from the previous frame
@@ -109,7 +152,16 @@ export const FlowCanvas = () => {
       ctx.fillStyle = "#1e1e1e";
       ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
-      // --- 2. Apply Camera Transform (World Space) ---
+      // We add a "buffer" (e.g., 50px) so items don't pop out instantly at the edge
+      const zoom = camera.current.z;
+      const panX = camera.current.x;
+      const panY = camera.current.y;
+
+      const viewLeft = -panX / zoom;
+      const viewTop = -panY / zoom;
+      const viewRight = (logicalWidth - panX) / zoom;
+      const viewBottom = (logicalHeight - panY) / zoom;
+
       ctx.save(); // Save "Screen Space" state
 
       // Translate first (Pan)
@@ -119,7 +171,28 @@ export const FlowCanvas = () => {
 
       drawGrid(ctx, logicalWidth, logicalHeight);
 
-      // --- 3. Draw World Content ---
+      let drawnCount = 0;
+
+      const itemSize = 50;
+      const totalItems = items.current.length;
+      const allItems = items.current; // Cache the array ref
+
+      for (let i = 0; i < totalItems; i++) {
+        const item = allItems[i];
+
+        // Culling Check
+        if (
+          item.x + itemSize > viewLeft &&
+          item.x < viewRight &&
+          item.y + itemSize > viewTop &&
+          item.y < viewBottom
+        ) {
+          ctx.fillStyle = item.color;
+          ctx.fillRect(item.x, item.y, itemSize, itemSize);
+          drawnCount++;
+        }
+      }
+
       // Draw the "Origin" (0,0) marker
 
       // X Axis (Red)
@@ -143,6 +216,21 @@ export const FlowCanvas = () => {
       ctx.fillRect(50, 50, 50, 50);
 
       ctx.restore(); // Restore to clean state for next operations (if any)
+
+      // Draw FPS counter on screen
+      ctx.fillStyle = "#00ff00";
+      ctx.font = "bold 14px monospace";
+      ctx.fillText(`FPS: ${Math.round(fps.current)}`, logicalWidth - 80, 25);
+      ctx.fillText(
+        `Zoom: ${camera.current.z.toFixed(2)}x`,
+        logicalWidth - 80,
+        45,
+      );
+      ctx.fillText(
+        `Drawn: ${drawnCount} / ${items.current.length}`,
+        logicalWidth - 150,
+        65,
+      ); // <--- NEW
 
       reqIdRef.current = requestAnimationFrame(render);
     };
@@ -175,7 +263,7 @@ export const FlowCanvas = () => {
 
     // Initialize
     resize();
-    render(); // Start the loop
+    // render(); // Start the loop
 
     // Event Listeners
     window.addEventListener("resize", resize);
@@ -184,6 +272,8 @@ export const FlowCanvas = () => {
     window.addEventListener("pointerup", handleUp); // <--- NEW
     // Add Wheel listener with { passive: false } so we can preventDefault()
     canvas.addEventListener("wheel", handleWheel, { passive: false }); // <--- NEW
+
+    reqIdRef.current = requestAnimationFrame(render);
 
     // Cleanup
     return () => {
