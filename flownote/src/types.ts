@@ -31,7 +31,7 @@ export type Item = {
 export type ToolMode = "select" | "sticky" | "rect" | "ellipse";
 
 /** The mutually exclusive drag interaction modes. */
-export type DragMode = "camera" | "item" | "resize";
+export type DragMode = "camera" | "item" | "resize" | "marquee";
 
 /** Identifies which resize handle is active. */
 export type ResizeHandle = "nw" | "ne" | "sw" | "se";

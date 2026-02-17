@@ -3,7 +3,10 @@
  *
  * Renders a full-viewport HTML canvas with:
  *   - Pannable/zoomable camera with smooth zoom interpolation
- *   - Draggable items with selection
+ *   - Draggable items with multi-selection
+ *   - Shift+click to toggle items in/out of selection
+ *   - Marquee (rubber-band) selection on empty space
+ *   - Multi-drag and multi-delete
  *   - Tool-based item creation (sticky, rect, ellipse)
  *   - Double-click to edit text on items
  *   - Undo/redo via command pattern (Ctrl+Z / Ctrl+Shift+Z)
@@ -27,6 +30,8 @@ import {
   DeleteItemCommand,
   EditTextCommand,
   ResizeItemCommand,
+  MultiMoveItemsCommand,
+  MultiDeleteItemsCommand,
 } from "../utils/commands";
 import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
@@ -80,17 +85,23 @@ export const FlowCanvas = () => {
   const dragModeRef = useRef<DragMode>("camera");
   const dragStart = useRef<Point>({ x: 0, y: 0 });
   const camStart = useRef<Point>({ x: 0, y: 0 });
-  const dragOffset = useRef<Point>({ x: 0, y: 0 });
-  /** Original position of an item when drag starts (for MoveItemCommand). */
-  const itemDragOrigin = useRef<Point>({ x: 0, y: 0 });
+
+  // ── Multi-drag origins — position snapshot for each selected item ──
+  const multiDragOrigins = useRef<Map<number, Point>>(new Map());
 
   // ── Resize state ─────────────────────────────────────────────────────
   const activeHandle = useRef<ResizeHandle | null>(null);
   /** Original bounding box when resize drag starts. */
   const resizeOrigin = useRef({ x: 0, y: 0, w: 0, h: 0 });
 
-  // ── Selection ───────────────────────────────────────────────────────
-  const selectedId = useRef<number | null>(null);
+  // ── Selection (Set for multi-select) ────────────────────────────────
+  const selectedIds = useRef<Set<number>>(new Set());
+  /** The "primary" selected item for resize handles (last clicked). */
+  const primarySelectedId = useRef<number | null>(null);
+
+  // ── Marquee state ───────────────────────────────────────────────────
+  const marqueeStart = useRef<Point>({ x: 0, y: 0 });
+  const marqueeEnd = useRef<Point>({ x: 0, y: 0 });
 
   // ── Text editing (React state — drives TextEditor rendering) ────────
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -174,12 +185,13 @@ export const FlowCanvas = () => {
       ctx.scale(dpr, dpr);
     };
 
-    // ── Cursor style helper ───────────────────────────────────────
+    // ── Cursor style helper ───────────────────────────────────────────
     const updateCursor = (e: PointerEvent) => {
       const tool = activeToolRef.current;
 
       if (isDragging.current) {
         if (dragModeRef.current === "camera") canvas.style.cursor = "grabbing";
+        else if (dragModeRef.current === "marquee") canvas.style.cursor = "crosshair";
         else if (dragModeRef.current === "resize" && activeHandle.current)
           canvas.style.cursor = RESIZE_CURSORS[activeHandle.current];
         else canvas.style.cursor = "move";
@@ -193,9 +205,9 @@ export const FlowCanvas = () => {
 
       const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
 
-      // Check resize handles first on the selected item
-      if (selectedId.current !== null) {
-        const selItem = items.current.find((i) => i.id === selectedId.current);
+      // Check resize handles first on the primary selected item
+      if (primarySelectedId.current !== null) {
+        const selItem = items.current.find((i) => i.id === primarySelectedId.current);
         if (selItem) {
           const handle = hitTestResizeHandle(worldPos.x, worldPos.y, selItem, camera.current.z);
           if (handle) {
@@ -223,14 +235,21 @@ export const FlowCanvas = () => {
         camera.current.y = camStart.current.y + dy;
         targetCamera.current.x = camera.current.x;
         targetCamera.current.y = camera.current.y;
-      } else if (dragModeRef.current === "item" && selectedId.current !== null) {
-        const item = items.current.find((i) => i.id === selectedId.current);
-        if (item) {
-          item.x = cursor.current.x - dragOffset.current.x;
-          item.y = cursor.current.y - dragOffset.current.y;
+      } else if (dragModeRef.current === "item" && selectedIds.current.size > 0) {
+        // Multi-drag: move all selected items relative to the drag anchor
+        const dx = cursor.current.x - dragStart.current.x;
+        const dy = cursor.current.y - dragStart.current.y;
+        for (const item of items.current) {
+          if (selectedIds.current.has(item.id)) {
+            const origin = multiDragOrigins.current.get(item.id);
+            if (origin) {
+              item.x = origin.x + dx;
+              item.y = origin.y + dy;
+            }
+          }
         }
-      } else if (dragModeRef.current === "resize" && selectedId.current !== null && activeHandle.current) {
-        const item = items.current.find((i) => i.id === selectedId.current);
+      } else if (dragModeRef.current === "resize" && primarySelectedId.current !== null && activeHandle.current) {
+        const item = items.current.find((i) => i.id === primarySelectedId.current);
         if (item) {
           const orig = resizeOrigin.current;
           const handle = activeHandle.current;
@@ -262,52 +281,93 @@ export const FlowCanvas = () => {
           item.width = newW;
           item.height = newH;
         }
+      } else if (dragModeRef.current === "marquee") {
+        marqueeEnd.current = { ...cursor.current };
       }
     };
 
     // ── Pointer: up — finalize drag commands ─────────────────────────
     const handleUp = (e: PointerEvent) => {
-      if (isDragging.current && selectedId.current !== null) {
-        const item = items.current.find((i) => i.id === selectedId.current);
-
-        if (item && dragModeRef.current === "item") {
-          const origin = itemDragOrigin.current;
-          if (item.x !== origin.x || item.y !== origin.y) {
-            const cmd = new MoveItemCommand(
-              item,
-              origin.x,
-              origin.y,
-              item.x,
-              item.y,
-            );
-            history.current.push({
-              description: cmd.description,
-              execute: () => cmd.execute(),
-              undo: () => cmd.undo(),
-            });
+      if (isDragging.current) {
+        if (dragModeRef.current === "item" && selectedIds.current.size > 0) {
+          // Build multi-move command entries
+          const entries: { item: Item; oldX: number; oldY: number; newX: number; newY: number }[] = [];
+          for (const item of items.current) {
+            if (selectedIds.current.has(item.id)) {
+              const origin = multiDragOrigins.current.get(item.id);
+              if (origin && (item.x !== origin.x || item.y !== origin.y)) {
+                entries.push({
+                  item,
+                  oldX: origin.x,
+                  oldY: origin.y,
+                  newX: item.x,
+                  newY: item.y,
+                });
+              }
+            }
+          }
+          if (entries.length === 1) {
+            // Use single move command for single item moves
+            const e = entries[0];
+            history.current.push(new MoveItemCommand(e.item, e.oldX, e.oldY, e.newX, e.newY));
             triggerSave();
+          } else if (entries.length > 1) {
+            history.current.push(new MultiMoveItemsCommand(entries));
+            triggerSave();
+          }
+          multiDragOrigins.current.clear();
+        }
+
+        if (dragModeRef.current === "resize" && primarySelectedId.current !== null) {
+          const item = items.current.find((i) => i.id === primarySelectedId.current);
+          if (item) {
+            const orig = resizeOrigin.current;
+            if (
+              item.x !== orig.x || item.y !== orig.y ||
+              item.width !== orig.w || item.height !== orig.h
+            ) {
+              const cmd = new ResizeItemCommand(
+                item,
+                orig.x, orig.y, orig.w, orig.h,
+                item.x, item.y, item.width, item.height,
+              );
+              history.current.push({
+                description: cmd.description,
+                execute: () => cmd.execute(),
+                undo: () => cmd.undo(),
+              });
+              triggerSave();
+            }
+            activeHandle.current = null;
           }
         }
 
-        if (item && dragModeRef.current === "resize") {
-          const orig = resizeOrigin.current;
-          if (
-            item.x !== orig.x || item.y !== orig.y ||
-            item.width !== orig.w || item.height !== orig.h
-          ) {
-            const cmd = new ResizeItemCommand(
-              item,
-              orig.x, orig.y, orig.w, orig.h,
-              item.x, item.y, item.width, item.height,
-            );
-            history.current.push({
-              description: cmd.description,
-              execute: () => cmd.execute(),
-              undo: () => cmd.undo(),
-            });
-            triggerSave();
+        if (dragModeRef.current === "marquee") {
+          // Finalize marquee: select items within the rectangle
+          const x1 = Math.min(marqueeStart.current.x, marqueeEnd.current.x);
+          const y1 = Math.min(marqueeStart.current.y, marqueeEnd.current.y);
+          const x2 = Math.max(marqueeStart.current.x, marqueeEnd.current.x);
+          const y2 = Math.max(marqueeStart.current.y, marqueeEnd.current.y);
+
+          // Only select if we actually dragged a meaningful area
+          if (Math.abs(x2 - x1) > 2 || Math.abs(y2 - y1) > 2) {
+            const newSelection = new Set<number>();
+            for (const item of items.current) {
+              // Item intersects the rectangle
+              if (
+                item.x + item.width > x1 &&
+                item.x < x2 &&
+                item.y + item.height > y1 &&
+                item.y < y2
+              ) {
+                newSelection.add(item.id);
+              }
+            }
+            selectedIds.current = newSelection;
+            primarySelectedId.current = newSelection.size > 0
+              ? [...newSelection][newSelection.size - 1]
+              : null;
           }
-          activeHandle.current = null;
         }
       }
 
@@ -340,11 +400,14 @@ export const FlowCanvas = () => {
         e.preventDefault();
         history.current.undo();
         triggerSave();
-        if (
-          selectedId.current !== null &&
-          !items.current.find((i) => i.id === selectedId.current)
-        ) {
-          selectedId.current = null;
+        // Clear selection for any items that no longer exist
+        for (const id of selectedIds.current) {
+          if (!items.current.find((i) => i.id === id)) {
+            selectedIds.current.delete(id);
+          }
+        }
+        if (primarySelectedId.current !== null && !selectedIds.current.has(primarySelectedId.current)) {
+          primarySelectedId.current = null;
         }
         return;
       }
@@ -360,26 +423,40 @@ export const FlowCanvas = () => {
         return;
       }
 
-      // Delete selected item: Delete or Backspace
-      if (
-        (e.key === "Delete" || e.key === "Backspace") &&
-        selectedId.current !== null
-      ) {
-        const item = items.current.find((i) => i.id === selectedId.current);
-        if (item) {
-          e.preventDefault();
-          history.current.push(new DeleteItemCommand(items.current, item));
-          selectedId.current = null;
-          triggerSave();
-        }
+      // Select All: Ctrl+A
+      if (e.ctrlKey && e.key === "a") {
+        e.preventDefault();
+        selectedIds.current = new Set(items.current.map((i) => i.id));
+        primarySelectedId.current = items.current.length > 0
+          ? items.current[items.current.length - 1].id
+          : null;
         return;
       }
 
-      // Escape — return to select mode
+      // Delete selected items: Delete or Backspace
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedIds.current.size > 0
+      ) {
+        e.preventDefault();
+        const toDelete = items.current.filter((i) => selectedIds.current.has(i.id));
+        if (toDelete.length === 1) {
+          history.current.push(new DeleteItemCommand(items.current, toDelete[0]));
+        } else if (toDelete.length > 1) {
+          history.current.push(new MultiDeleteItemsCommand(items.current, toDelete));
+        }
+        selectedIds.current = new Set();
+        primarySelectedId.current = null;
+        triggerSave();
+        return;
+      }
+
+      // Escape — return to select mode and clear selection
       if (e.key === "Escape") {
         activeToolRef.current = "select";
         setActiveTool("select");
-        selectedId.current = null;
+        selectedIds.current = new Set();
+        primarySelectedId.current = null;
       }
     };
 
@@ -431,11 +508,30 @@ export const FlowCanvas = () => {
         ) {
           drawItem(ctx, item, camera.current.z, item.id === editingIdRef.current);
 
-          if (item.id === selectedId.current) {
+          if (selectedIds.current.has(item.id)) {
             drawSelectionHighlight(ctx, item, camera.current.z);
-            drawResizeHandles(ctx, item, camera.current.z);
+            // Only draw resize handles on the primary selected item
+            if (item.id === primarySelectedId.current) {
+              drawResizeHandles(ctx, item, camera.current.z);
+            }
           }
         }
+      }
+
+      // Draw marquee rectangle
+      if (isDragging.current && dragModeRef.current === "marquee") {
+        const mx1 = Math.min(marqueeStart.current.x, marqueeEnd.current.x);
+        const my1 = Math.min(marqueeStart.current.y, marqueeEnd.current.y);
+        const mw = Math.abs(marqueeEnd.current.x - marqueeStart.current.x);
+        const mh = Math.abs(marqueeEnd.current.y - marqueeStart.current.y);
+
+        ctx.fillStyle = "rgba(74, 158, 255, 0.1)";
+        ctx.fillRect(mx1, my1, mw, mh);
+        ctx.strokeStyle = "rgba(74, 158, 255, 0.6)";
+        ctx.lineWidth = 1 / camera.current.z;
+        ctx.setLineDash([6 / camera.current.z, 4 / camera.current.z]);
+        ctx.strokeRect(mx1, my1, mw, mh);
+        ctx.setLineDash([]);
       }
 
       // Debug overlays
@@ -500,7 +596,8 @@ export const FlowCanvas = () => {
   };
 
   /**
-   * Pointer-down handler — dispatches to placement, item drag, or camera pan.
+   * Pointer-down handler — dispatches to placement, resize, item drag,
+   * marquee selection, or camera pan.
    */
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     // Ignore clicks while editing text
@@ -513,17 +610,18 @@ export const FlowCanvas = () => {
     if (tool === "sticky" || tool === "rect" || tool === "ellipse") {
       const newItem = buildItem(worldPos.x, worldPos.y, tool);
       history.current.push(new CreateItemCommand(items.current, newItem));
-      selectedId.current = newItem.id;
+      selectedIds.current = new Set([newItem.id]);
+      primarySelectedId.current = newItem.id;
       activeToolRef.current = "select";
       setActiveTool("select");
       triggerSave();
       return;
     }
 
-    // ── Select mode: check resize handles, then items, then camera pan ──
-    // First: check if clicking a resize handle on the selected item
-    if (selectedId.current !== null) {
-      const selItem = items.current.find((i) => i.id === selectedId.current);
+    // ── Select mode ─────────────────────────────────────────────────
+    // First: check resize handles on the primary selected item
+    if (primarySelectedId.current !== null) {
+      const selItem = items.current.find((i) => i.id === primarySelectedId.current);
       if (selItem) {
         const handle = hitTestResizeHandle(worldPos.x, worldPos.y, selItem, camera.current.z);
         if (handle) {
@@ -545,22 +643,53 @@ export const FlowCanvas = () => {
     const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
 
     if (hitItem) {
-      selectedId.current = hitItem.id;
+      if (e.shiftKey) {
+        // Shift+click: toggle this item in/out of the selection
+        if (selectedIds.current.has(hitItem.id)) {
+          selectedIds.current.delete(hitItem.id);
+          if (primarySelectedId.current === hitItem.id) {
+            // Reassign primary to the last remaining, or null
+            const remaining = [...selectedIds.current];
+            primarySelectedId.current = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+          }
+        } else {
+          selectedIds.current.add(hitItem.id);
+          primarySelectedId.current = hitItem.id;
+        }
+        // Don't start a drag on shift+click
+        return;
+      }
+
+      // Normal click
+      if (!selectedIds.current.has(hitItem.id)) {
+        // Clicking an unselected item: replace selection
+        selectedIds.current = new Set([hitItem.id]);
+        primarySelectedId.current = hitItem.id;
+      }
+      // If item is already selected, keep multi-selection for dragging
+
+      // Start multi-drag
       isDragging.current = true;
       dragModeRef.current = "item";
-      dragOffset.current = {
-        x: worldPos.x - hitItem.x,
-        y: worldPos.y - hitItem.y,
-      };
-      itemDragOrigin.current = { x: hitItem.x, y: hitItem.y };
+      dragStart.current = { ...worldPos };
+      // Capture original positions for all selected items
+      multiDragOrigins.current.clear();
+      for (const item of items.current) {
+        if (selectedIds.current.has(item.id)) {
+          multiDragOrigins.current.set(item.id, { x: item.x, y: item.y });
+        }
+      }
     } else {
-      selectedId.current = null;
-      isDragging.current = true;
-      dragModeRef.current = "camera";
-      dragStart.current = { x: e.clientX, y: e.clientY };
-      camStart.current = { x: camera.current.x, y: camera.current.y };
-      targetCamera.current.x = camera.current.x;
-      targetCamera.current.y = camera.current.y;
+      // Click on empty space
+      if (!e.shiftKey) {
+        // Start marquee selection
+        selectedIds.current = new Set();
+        primarySelectedId.current = null;
+        isDragging.current = true;
+        dragModeRef.current = "marquee";
+        marqueeStart.current = { ...worldPos };
+        marqueeEnd.current = { ...worldPos };
+      }
     }
   };
 
@@ -572,7 +701,8 @@ export const FlowCanvas = () => {
     const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
 
     if (hitItem) {
-      selectedId.current = hitItem.id;
+      selectedIds.current = new Set([hitItem.id]);
+      primarySelectedId.current = hitItem.id;
       setEditingItem(hitItem);
       editingIdRef.current = hitItem.id;
     }

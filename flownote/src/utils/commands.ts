@@ -179,3 +179,70 @@ export class ResizeItemCommand implements Command {
         this.item.height = this.oldH;
     }
 }
+
+/**
+ * Command: Move multiple items at once.
+ *
+ * Captures each item's old and new position for undoing multi-drag.
+ */
+export class MultiMoveItemsCommand implements Command {
+    readonly description = "Move items";
+    private entries: { item: Item; oldX: number; oldY: number; newX: number; newY: number }[];
+
+    constructor(entries: { item: Item; oldX: number; oldY: number; newX: number; newY: number }[]) {
+        this.entries = entries;
+    }
+
+    execute(): void {
+        for (const e of this.entries) {
+            e.item.x = e.newX;
+            e.item.y = e.newY;
+        }
+    }
+
+    undo(): void {
+        for (const e of this.entries) {
+            e.item.x = e.oldX;
+            e.item.y = e.oldY;
+        }
+    }
+}
+
+/**
+ * Command: Delete multiple items at once.
+ */
+export class MultiDeleteItemsCommand implements Command {
+    readonly description: string;
+    private itemsArray: Item[];
+    private deletedItems: { item: Item; index: number }[] = [];
+
+    constructor(itemsArray: Item[], toDelete: Item[]) {
+        this.itemsArray = itemsArray;
+        this.description = `Delete ${toDelete.length} items`;
+        // Capture items and their indices (sorted descending for safe splice)
+        for (const item of toDelete) {
+            const idx = itemsArray.indexOf(item);
+            if (idx !== -1) {
+                this.deletedItems.push({ item, index: idx });
+            }
+        }
+        this.deletedItems.sort((a, b) => b.index - a.index);
+    }
+
+    execute(): void {
+        for (const entry of this.deletedItems) {
+            const idx = this.itemsArray.indexOf(entry.item);
+            if (idx !== -1) {
+                this.itemsArray.splice(idx, 1);
+            }
+        }
+    }
+
+    undo(): void {
+        // Re-insert in ascending index order
+        const sorted = [...this.deletedItems].sort((a, b) => a.index - b.index);
+        for (const entry of sorted) {
+            this.itemsArray.splice(entry.index, 0, entry.item);
+        }
+    }
+}
