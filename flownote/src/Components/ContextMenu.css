@@ -1,0 +1,48 @@
+.context-menu {
+    position: fixed;
+    z-index: 300;
+    min-width: 180px;
+    background: rgba(30, 30, 50, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 4px 0;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-size: 13px;
+    color: #e0e0e0;
+    user-select: none;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+    background: rgba(74, 158, 255, 0.18);
+}
+
+.context-menu-item.danger {
+    color: #ff6b6b;
+}
+
+.context-menu-item.danger:hover {
+    background: rgba(255, 107, 107, 0.15);
+}
+
+.context-menu-shortcut {
+    margin-left: 24px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 4px 0;
+}

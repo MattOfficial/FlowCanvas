@@ -40,6 +40,7 @@ import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
 import { drawItem, drawSelectionHighlight, drawResizeHandles, hitTestResizeHandle, RESIZE_CURSORS } from "../rendering/items";
 import { Toolbar } from "./Toolbar";
 import { TextEditor } from "./TextEditor";
+import { ContextMenu, type ContextMenuAction } from "./ContextMenu";
 
 /** Interpolation speed for smooth zoom (0–1, higher = snappier). */
 const ZOOM_LERP_SPEED = 0.15;
@@ -62,6 +63,10 @@ const MIN_ITEM_SIZE = 40;
 
 /** Default color for rect/ellipse items. */
 const SHAPE_COLOR = "rgba(255, 255, 255, 0.08)";
+
+/** Nudge distance in world pixels (normal / with Shift). */
+const NUDGE_NORMAL = 10;
+const NUDGE_FINE = 1;
 
 /** Linear interpolation between two values. */
 function lerp(a: number, b: number, t: number): number {
@@ -107,6 +112,13 @@ export const FlowCanvas = () => {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   /** Ref mirror of editingItem's ID so the render loop can access it. */
   const editingIdRef = useRef<number | null>(null);
+
+  // ── Context menu (React state — drives ContextMenu rendering) ─────
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    actions: ContextMenuAction[];
+  } | null>(null);
 
   // ── Undo/Redo ───────────────────────────────────────────────────────
   const history = useRef(new History());
@@ -457,6 +469,67 @@ export const FlowCanvas = () => {
         setActiveTool("select");
         selectedIds.current = new Set();
         primarySelectedId.current = null;
+        setContextMenu(null);
+        return;
+      }
+
+      // Duplicate: Ctrl+D
+      if (e.ctrlKey && e.key === "d" && selectedIds.current.size > 0) {
+        e.preventDefault();
+        const offset = 20;
+        const newIds = new Set<number>();
+        const toDuplicate = items.current.filter((i) => selectedIds.current.has(i.id));
+        for (const orig of toDuplicate) {
+          const dup: Item = {
+            ...orig,
+            id: nextId.current++,
+            x: orig.x + offset,
+            y: orig.y + offset,
+          };
+          history.current.push(new CreateItemCommand(items.current, dup));
+          newIds.add(dup.id);
+        }
+        selectedIds.current = newIds;
+        primarySelectedId.current = newIds.size > 0 ? [...newIds][newIds.size - 1] : null;
+        triggerSave();
+        return;
+      }
+
+      // Arrow keys: nudge selected items
+      if (
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) &&
+        selectedIds.current.size > 0
+      ) {
+        e.preventDefault();
+        const dist = e.shiftKey ? NUDGE_FINE : NUDGE_NORMAL;
+        let dx = 0, dy = 0;
+        if (e.key === "ArrowUp") dy = -dist;
+        if (e.key === "ArrowDown") dy = dist;
+        if (e.key === "ArrowLeft") dx = -dist;
+        if (e.key === "ArrowRight") dx = dist;
+
+        const entries: { item: Item; oldX: number; oldY: number; newX: number; newY: number }[] = [];
+        for (const item of items.current) {
+          if (selectedIds.current.has(item.id)) {
+            entries.push({
+              item,
+              oldX: item.x,
+              oldY: item.y,
+              newX: item.x + dx,
+              newY: item.y + dy,
+            });
+            item.x += dx;
+            item.y += dy;
+          }
+        }
+        if (entries.length === 1) {
+          const en = entries[0];
+          history.current.push(new MoveItemCommand(en.item, en.oldX, en.oldY, en.newX, en.newY));
+        } else if (entries.length > 1) {
+          history.current.push(new MultiMoveItemsCommand(entries));
+        }
+        triggerSave();
+        return;
       }
     };
 
@@ -600,6 +673,12 @@ export const FlowCanvas = () => {
    * marquee selection, or camera pan.
    */
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Close context menu on any click
+    if (contextMenu) {
+      setContextMenu(null);
+      return;
+    }
+
     // Ignore clicks while editing text
     if (editingItem) return;
 
@@ -618,7 +697,7 @@ export const FlowCanvas = () => {
       return;
     }
 
-    // ── Select mode ─────────────────────────────────────────────────
+    // ── Select mode ─────────────────────────────────────────────
     // First: check resize handles on the primary selected item
     if (primarySelectedId.current !== null) {
       const selItem = items.current.find((i) => i.id === primarySelectedId.current);
@@ -648,7 +727,6 @@ export const FlowCanvas = () => {
         if (selectedIds.current.has(hitItem.id)) {
           selectedIds.current.delete(hitItem.id);
           if (primarySelectedId.current === hitItem.id) {
-            // Reassign primary to the last remaining, or null
             const remaining = [...selectedIds.current];
             primarySelectedId.current = remaining.length > 0 ? remaining[remaining.length - 1] : null;
           }
@@ -656,23 +734,19 @@ export const FlowCanvas = () => {
           selectedIds.current.add(hitItem.id);
           primarySelectedId.current = hitItem.id;
         }
-        // Don't start a drag on shift+click
         return;
       }
 
       // Normal click
       if (!selectedIds.current.has(hitItem.id)) {
-        // Clicking an unselected item: replace selection
         selectedIds.current = new Set([hitItem.id]);
         primarySelectedId.current = hitItem.id;
       }
-      // If item is already selected, keep multi-selection for dragging
 
       // Start multi-drag
       isDragging.current = true;
       dragModeRef.current = "item";
       dragStart.current = { ...worldPos };
-      // Capture original positions for all selected items
       multiDragOrigins.current.clear();
       for (const item of items.current) {
         if (selectedIds.current.has(item.id)) {
@@ -682,7 +756,6 @@ export const FlowCanvas = () => {
     } else {
       // Click on empty space
       if (!e.shiftKey) {
-        // Start marquee selection
         selectedIds.current = new Set();
         primarySelectedId.current = null;
         isDragging.current = true;
@@ -708,12 +781,105 @@ export const FlowCanvas = () => {
     }
   };
 
+  /**
+   * Right-click handler — shows context menu with relevant actions.
+   */
+  const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
+    const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
+
+    const actions: ContextMenuAction[] = [];
+
+    if (hitItem) {
+      // Right-clicked on an item: select it if not already
+      if (!selectedIds.current.has(hitItem.id)) {
+        selectedIds.current = new Set([hitItem.id]);
+        primarySelectedId.current = hitItem.id;
+      }
+
+      const count = selectedIds.current.size;
+      const label = count > 1 ? `Duplicate ${count} Items` : "Duplicate";
+      const delLabel = count > 1 ? `Delete ${count} Items` : "Delete";
+
+      actions.push({
+        label,
+        shortcut: "Ctrl+D",
+        action: () => {
+          const offset = 20;
+          const newIds = new Set<number>();
+          const toDup = items.current.filter((i) => selectedIds.current.has(i.id));
+          for (const orig of toDup) {
+            const dup: Item = {
+              ...orig,
+              id: nextId.current++,
+              x: orig.x + offset,
+              y: orig.y + offset,
+            };
+            history.current.push(new CreateItemCommand(items.current, dup));
+            newIds.add(dup.id);
+          }
+          selectedIds.current = newIds;
+          primarySelectedId.current = newIds.size > 0 ? [...newIds][newIds.size - 1] : null;
+          triggerSave();
+        },
+      });
+
+      actions.push({ label: "---", action: () => { } });
+
+      actions.push({
+        label: "Select All",
+        shortcut: "Ctrl+A",
+        action: () => {
+          selectedIds.current = new Set(items.current.map((i) => i.id));
+          primarySelectedId.current = items.current.length > 0
+            ? items.current[items.current.length - 1].id
+            : null;
+        },
+      });
+
+      actions.push({ label: "---", action: () => { } });
+
+      actions.push({
+        label: delLabel,
+        shortcut: "Del",
+        danger: true,
+        action: () => {
+          const toDelete = items.current.filter((i) => selectedIds.current.has(i.id));
+          if (toDelete.length === 1) {
+            history.current.push(new DeleteItemCommand(items.current, toDelete[0]));
+          } else if (toDelete.length > 1) {
+            history.current.push(new MultiDeleteItemsCommand(items.current, toDelete));
+          }
+          selectedIds.current = new Set();
+          primarySelectedId.current = null;
+          triggerSave();
+        },
+      });
+    } else {
+      // Right-clicked on empty space
+      actions.push({
+        label: "Select All",
+        shortcut: "Ctrl+A",
+        action: () => {
+          selectedIds.current = new Set(items.current.map((i) => i.id));
+          primarySelectedId.current = items.current.length > 0
+            ? items.current[items.current.length - 1].id
+            : null;
+        },
+      });
+    }
+
+    setContextMenu({ x: e.clientX, y: e.clientY, actions });
+  };
+
   return (
     <>
       <canvas
         ref={canvasRef}
         onPointerDown={onPointerDown}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
         style={{ display: "block", touchAction: "none", cursor: "grab" }}
       />
       <Toolbar activeTool={activeTool} onToolChange={handleToolChange} />
@@ -723,6 +889,14 @@ export const FlowCanvas = () => {
           camera={camera.current}
           onCommit={handleTextCommit}
           onCancel={handleTextCancel}
+        />
+      )}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          actions={contextMenu.actions}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </>
