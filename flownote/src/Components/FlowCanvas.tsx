@@ -5,6 +5,7 @@
  *   - Pannable/zoomable camera with smooth zoom interpolation
  *   - Draggable items with selection
  *   - Tool-based item creation (sticky, rect, ellipse)
+ *   - Undo/redo via command pattern (Ctrl+Z / Ctrl+Shift+Z)
  *   - World-space dot grid
  *   - Context-aware cursor styles
  *   - Optional debug overlays (toggle with Ctrl+Shift+D)
@@ -17,6 +18,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type { Camera, DragMode, Item, ItemType, Point, ToolMode } from "../types";
 import { screenToWorld, getVisibleBounds, zoomAtPoint } from "../utils/camera";
 import { hitTestItems } from "../utils/hitTest";
+import { History } from "../utils/history";
+import { CreateItemCommand, MoveItemCommand, DeleteItemCommand } from "../utils/commands";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
@@ -65,9 +68,14 @@ export const FlowCanvas = () => {
   const dragStart = useRef<Point>({ x: 0, y: 0 });
   const camStart = useRef<Point>({ x: 0, y: 0 });
   const dragOffset = useRef<Point>({ x: 0, y: 0 });
+  /** Original position of an item when drag starts (for MoveItemCommand). */
+  const itemDragOrigin = useRef<Point>({ x: 0, y: 0 });
 
   // ── Selection ───────────────────────────────────────────────────────
   const selectedId = useRef<number | null>(null);
+
+  // ── Undo/Redo ───────────────────────────────────────────────────────
+  const history = useRef(new History());
 
   // ── Debug mode (toggle with Ctrl+Shift+D) ───────────────────────────
   const debugMode = useRef(false);
@@ -149,8 +157,38 @@ export const FlowCanvas = () => {
       }
     };
 
-    // ── Pointer: up ───────────────────────────────────────────────────
+    // ── Pointer: up — finalize item drag as a MoveItemCommand ─────────
     const handleUp = (e: PointerEvent) => {
+      if (
+        isDragging.current &&
+        dragModeRef.current === "item" &&
+        selectedId.current !== null
+      ) {
+        const item = items.current.find((i) => i.id === selectedId.current);
+        if (item) {
+          const origin = itemDragOrigin.current;
+          // Only push a command if the item actually moved
+          if (item.x !== origin.x || item.y !== origin.y) {
+            const cmd = new MoveItemCommand(
+              item,
+              origin.x,
+              origin.y,
+              item.x,
+              item.y,
+            );
+            // Don't call cmd.execute() — item is already at the new position.
+            // Push it raw onto the undo stack.
+            history.current.push({
+              description: cmd.description,
+              execute: () => cmd.execute(),
+              undo: () => cmd.undo(),
+            });
+            // The push() calls execute() which sets item to newX/newY —
+            // that's fine because item is already there.
+          }
+        }
+      }
+
       isDragging.current = false;
       updateCursor(e);
     };
@@ -174,6 +212,45 @@ export const FlowCanvas = () => {
         debugMode.current = !debugMode.current;
         return;
       }
+
+      // Undo: Ctrl+Z
+      if (e.ctrlKey && !e.shiftKey && e.key === "z") {
+        e.preventDefault();
+        history.current.undo();
+        // If undone item was selected but no longer exists, deselect
+        if (
+          selectedId.current !== null &&
+          !items.current.find((i) => i.id === selectedId.current)
+        ) {
+          selectedId.current = null;
+        }
+        return;
+      }
+
+      // Redo: Ctrl+Shift+Z or Ctrl+Y
+      if (
+        (e.ctrlKey && e.shiftKey && e.key === "Z") ||
+        (e.ctrlKey && !e.shiftKey && e.key === "y")
+      ) {
+        e.preventDefault();
+        history.current.redo();
+        return;
+      }
+
+      // Delete selected item: Delete or Backspace
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedId.current !== null
+      ) {
+        const item = items.current.find((i) => i.id === selectedId.current);
+        if (item) {
+          e.preventDefault();
+          history.current.push(new DeleteItemCommand(items.current, item));
+          selectedId.current = null;
+        }
+        return;
+      }
+
       // Escape — return to select mode
       if (e.key === "Escape") {
         activeToolRef.current = "select";
@@ -272,9 +349,9 @@ export const FlowCanvas = () => {
   }, []);
 
   /**
-   * Creates a new item at the given world position with the current tool type.
+   * Builds and returns a new item definition (does NOT add to canvas).
    */
-  const createItem = (worldX: number, worldY: number, type: ItemType): Item => {
+  const buildItem = (worldX: number, worldY: number, type: ItemType): Item => {
     const size = DEFAULT_SIZES[type];
     let color: string;
 
@@ -285,7 +362,7 @@ export const FlowCanvas = () => {
       color = SHAPE_COLOR;
     }
 
-    const item: Item = {
+    return {
       id: nextId.current++,
       type,
       x: worldX - size.width / 2,
@@ -295,9 +372,6 @@ export const FlowCanvas = () => {
       color,
       text: "",
     };
-
-    items.current.push(item);
-    return item;
   };
 
   /**
@@ -307,9 +381,10 @@ export const FlowCanvas = () => {
     const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
     const tool = activeToolRef.current;
 
-    // ── Placement mode: create a new item ───────────────────────────
+    // ── Placement mode: create a new item via command ────────────────
     if (tool === "sticky" || tool === "rect" || tool === "ellipse") {
-      const newItem = createItem(worldPos.x, worldPos.y, tool);
+      const newItem = buildItem(worldPos.x, worldPos.y, tool);
+      history.current.push(new CreateItemCommand(items.current, newItem));
       selectedId.current = newItem.id;
       // Switch back to select tool after placement
       activeToolRef.current = "select";
@@ -328,6 +403,8 @@ export const FlowCanvas = () => {
         x: worldPos.x - hitItem.x,
         y: worldPos.y - hitItem.y,
       };
+      // Capture original position for undo
+      itemDragOrigin.current = { x: hitItem.x, y: hitItem.y };
     } else {
       selectedId.current = null;
       isDragging.current = true;

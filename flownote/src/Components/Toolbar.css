@@ -1,0 +1,84 @@
+.toolbar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+    background: rgba(30, 30, 50, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 100;
+    user-select: none;
+}
+
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 20px;
+    position: relative;
+}
+
+.toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.toolbar-btn.active {
+    background: rgba(74, 158, 255, 0.2);
+    color: #4a9eff;
+}
+
+.toolbar-btn:active {
+    transform: scale(0.93);
+}
+
+.toolbar-separator {
+    width: 1px;
+    margin: 6px 2px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.toolbar-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.toolbar-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 10px;
+    background: rgba(20, 20, 35, 0.95);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    font-family: Inter, system-ui, sans-serif;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.toolbar-btn:hover .toolbar-tooltip {
+    opacity: 1;
+}
