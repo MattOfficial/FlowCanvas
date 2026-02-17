@@ -2,9 +2,10 @@
  * FlowCanvas — the core infinite canvas component.
  *
  * Renders a full-viewport HTML canvas with:
- *   - Pannable/zoomable camera
+ *   - Pannable/zoomable camera with smooth zoom interpolation
  *   - Draggable items with selection
- *   - World-space grid
+ *   - World-space dot grid
+ *   - Context-aware cursor styles
  *   - Optional debug overlays (toggle with Ctrl+Shift+D)
  *
  * All mutable state lives in refs to avoid React re-renders — the
@@ -22,12 +23,26 @@ import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
 /** Side length of every item square in world-space pixels. */
 const ITEM_SIZE = 50;
 
+/** Interpolation speed for smooth zoom (0–1, higher = snappier). */
+const ZOOM_LERP_SPEED = 0.15;
+
+/** Background color — warm dark neutral. */
+const BG_COLOR = "#1a1a2e";
+
+/** Linear interpolation between two values. */
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 export const FlowCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reqIdRef = useRef<number>(0);
 
   // ── Camera ──────────────────────────────────────────────────────────
+  /** The camera values currently being rendered (smoothly interpolated). */
   const camera = useRef<Camera>({ x: 100, y: 100, z: 1.5 });
+  /** The target camera values (set instantly by input, rendered toward). */
+  const targetCamera = useRef<Camera>({ x: 100, y: 100, z: 1.5 });
 
   // ── Drag state ──────────────────────────────────────────────────────
   const isDragging = useRef(false);
@@ -68,9 +83,22 @@ export const FlowCanvas = () => {
       ctx.scale(dpr, dpr);
     };
 
+    // ── Cursor style helper ───────────────────────────────────────────
+    const updateCursor = (e: PointerEvent) => {
+      if (isDragging.current) {
+        canvas.style.cursor =
+          dragModeRef.current === "camera" ? "grabbing" : "move";
+        return;
+      }
+      const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
+      const hover = hitTestItems(worldPos.x, worldPos.y, items.current, ITEM_SIZE);
+      canvas.style.cursor = hover ? "move" : "grab";
+    };
+
     // ── Pointer: move ─────────────────────────────────────────────────
     const handleMove = (e: PointerEvent) => {
       cursor.current = screenToWorld(e.clientX, e.clientY, camera.current);
+      updateCursor(e);
 
       if (!isDragging.current) return;
 
@@ -79,6 +107,9 @@ export const FlowCanvas = () => {
         const dy = e.clientY - dragStart.current.y;
         camera.current.x = camStart.current.x + dx;
         camera.current.y = camStart.current.y + dy;
+        // Keep target in sync during pan so zoom lerp doesn't fight
+        targetCamera.current.x = camera.current.x;
+        targetCamera.current.y = camera.current.y;
       } else if (dragModeRef.current === "item" && selectedId.current !== null) {
         const item = items.current.find((i) => i.id === selectedId.current);
         if (item) {
@@ -89,14 +120,21 @@ export const FlowCanvas = () => {
     };
 
     // ── Pointer: up ───────────────────────────────────────────────────
-    const handleUp = () => {
+    const handleUp = (e: PointerEvent) => {
       isDragging.current = false;
+      updateCursor(e);
     };
 
     // ── Wheel: zoom ───────────────────────────────────────────────────
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      camera.current = zoomAtPoint(camera.current, e.clientX, e.clientY, e.deltaY);
+      // Update the target — the render loop will smoothly interpolate
+      targetCamera.current = zoomAtPoint(
+        targetCamera.current,
+        e.clientX,
+        e.clientY,
+        e.deltaY,
+      );
     };
 
     // ── Keyboard: debug toggle ────────────────────────────────────────
@@ -116,12 +154,24 @@ export const FlowCanvas = () => {
       lastFrameTime.current = time;
       fps.current = 0.9 * fps.current + 0.1 * (1000 / Math.max(delta, 0.001));
 
+      // ── Smooth zoom interpolation ─────────────────────────────────
+      camera.current.x = lerp(camera.current.x, targetCamera.current.x, ZOOM_LERP_SPEED);
+      camera.current.y = lerp(camera.current.y, targetCamera.current.y, ZOOM_LERP_SPEED);
+      camera.current.z = lerp(camera.current.z, targetCamera.current.z, ZOOM_LERP_SPEED);
+
+      // Snap when close enough to avoid endless micro-animations
+      if (Math.abs(camera.current.z - targetCamera.current.z) < 0.0001) {
+        camera.current.x = targetCamera.current.x;
+        camera.current.y = targetCamera.current.y;
+        camera.current.z = targetCamera.current.z;
+      }
+
       // Reset transform and clear
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const logicalWidth = canvas.width / dpr;
       const logicalHeight = canvas.height / dpr;
       ctx.clearRect(0, 0, logicalWidth, logicalHeight);
-      ctx.fillStyle = "#1e1e1e";
+      ctx.fillStyle = BG_COLOR;
       ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
       // Compute visible bounds for frustum culling
@@ -213,6 +263,9 @@ export const FlowCanvas = () => {
       dragModeRef.current = "camera";
       dragStart.current = { x: e.clientX, y: e.clientY };
       camStart.current = { x: camera.current.x, y: camera.current.y };
+      // Sync target on pan start
+      targetCamera.current.x = camera.current.x;
+      targetCamera.current.y = camera.current.y;
     }
   };
 
@@ -220,7 +273,7 @@ export const FlowCanvas = () => {
     <canvas
       ref={canvasRef}
       onPointerDown={onPointerDown}
-      style={{ display: "block", touchAction: "none" }}
+      style={{ display: "block", touchAction: "none", cursor: "grab" }}
     />
   );
 };
