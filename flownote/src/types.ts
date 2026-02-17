@@ -13,7 +13,7 @@ export type Camera = {
 };
 
 /** Visual types an item can be. */
-export type ItemType = "sticky" | "rect" | "ellipse";
+export type ItemType = "sticky" | "rect" | "ellipse" | "diamond" | "cylinder" | "hexagon" | "parallelogram" | "document" | "triangle";
 
 /** A draggable item on the canvas. */
 export type Item = {
@@ -28,7 +28,7 @@ export type Item = {
 };
 
 /** The current active tool mode. */
-export type ToolMode = "select" | "sticky" | "rect" | "ellipse";
+export type ToolMode = "select" | "sticky" | "rect" | "ellipse" | "diamond" | "cylinder" | "hexagon" | "parallelogram" | "document" | "triangle";
 
 /** The mutually exclusive drag interaction modes. */
 export type DragMode = "camera" | "item" | "resize" | "marquee";

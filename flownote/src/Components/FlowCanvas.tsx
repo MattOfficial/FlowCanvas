@@ -55,6 +55,12 @@ const DEFAULT_SIZES: Record<ItemType, { width: number; height: number }> = {
   sticky: { width: 200, height: 200 },
   rect: { width: 180, height: 120 },
   ellipse: { width: 160, height: 120 },
+  diamond: { width: 140, height: 140 },
+  cylinder: { width: 120, height: 160 },
+  hexagon: { width: 160, height: 120 },
+  parallelogram: { width: 180, height: 100 },
+  document: { width: 160, height: 140 },
+  triangle: { width: 140, height: 130 },
 };
 
 /** Pastel colors for sticky notes, cycling through these on creation. */
@@ -694,7 +700,7 @@ export const FlowCanvas = () => {
     const tool = activeToolRef.current;
 
     // ── Placement mode: create a new item via command ────────────────
-    if (tool === "sticky" || tool === "rect" || tool === "ellipse") {
+    if (tool !== "select") {
       const newItem = buildItem(worldPos.x, worldPos.y, tool);
       history.current.push(new CreateItemCommand(items.current, newItem));
       selectedIds.current = new Set([newItem.id]);

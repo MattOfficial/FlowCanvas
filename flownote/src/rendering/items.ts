@@ -1,7 +1,8 @@
 /**
  * Item rendering — per-type draw functions.
  *
- * Each item type (sticky, rect, ellipse) has its own visual style.
+ * Each item type (sticky, rect, ellipse, diamond, cylinder, hexagon,
+ * parallelogram, document, triangle) has its own visual style.
  * All functions draw in world-space and expect the camera transform
  * to already be applied to the context.
  */
@@ -120,6 +121,214 @@ function drawEllipse(
 }
 
 /**
+ * Draws a diamond (rhombus) — rotated square, used for decision nodes.
+ */
+function drawDiamond(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+    hideText: boolean,
+): void {
+    const cx = item.x + item.width / 2;
+    const cy = item.y + item.height / 2;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, item.y);              // top
+    ctx.lineTo(item.x + item.width, cy); // right
+    ctx.lineTo(cx, item.y + item.height);// bottom
+    ctx.lineTo(item.x, cy);              // left
+    ctx.closePath();
+
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    if (item.text && !hideText) {
+        drawItemText(ctx, item, "rgba(255, 255, 255, 0.85)");
+    }
+}
+
+/**
+ * Draws a cylinder — rect body with elliptical top and bottom caps.
+ * Used for databases / storage.
+ */
+function drawCylinder(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+    hideText: boolean,
+): void {
+    const { x, y, width, height } = item;
+    const capHeight = Math.min(height * 0.15, 24);
+    const cx = x + width / 2;
+
+    // Body
+    ctx.beginPath();
+    ctx.moveTo(x, y + capHeight);
+    ctx.lineTo(x, y + height - capHeight);
+    // Bottom ellipse
+    ctx.ellipse(cx, y + height - capHeight, width / 2, capHeight, 0, Math.PI, 0, true);
+    ctx.lineTo(x + width, y + capHeight);
+    // Top ellipse (hidden behind fill)
+    ctx.ellipse(cx, y + capHeight, width / 2, capHeight, 0, 0, Math.PI, true);
+    ctx.closePath();
+
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    // Top cap ellipse (visible)
+    ctx.beginPath();
+    ctx.ellipse(cx, y + capHeight, width / 2, capHeight, 0, 0, Math.PI * 2);
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    if (item.text && !hideText) {
+        // Offset text down slightly to account for the top cap
+        const textItem = { ...item, y: y + capHeight * 0.5, height: height - capHeight };
+        drawItemText(ctx, textItem, "rgba(255, 255, 255, 0.85)");
+    }
+}
+
+/**
+ * Draws a hexagon — 6-sided polygon, used for processes/services.
+ */
+function drawHexagon(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+    hideText: boolean,
+): void {
+    const { x, y, width, height } = item;
+    const inset = width * 0.25; // horizontal inset for left/right points
+
+    ctx.beginPath();
+    ctx.moveTo(x + inset, y);                   // top-left
+    ctx.lineTo(x + width - inset, y);            // top-right
+    ctx.lineTo(x + width, y + height / 2);       // right
+    ctx.lineTo(x + width - inset, y + height);   // bottom-right
+    ctx.lineTo(x + inset, y + height);            // bottom-left
+    ctx.lineTo(x, y + height / 2);                // left
+    ctx.closePath();
+
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    if (item.text && !hideText) {
+        drawItemText(ctx, item, "rgba(255, 255, 255, 0.85)");
+    }
+}
+
+/**
+ * Draws a parallelogram — skewed rectangle, used for I/O operations.
+ */
+function drawParallelogram(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+    hideText: boolean,
+): void {
+    const { x, y, width, height } = item;
+    const skew = width * 0.2; // horizontal skew amount
+
+    ctx.beginPath();
+    ctx.moveTo(x + skew, y);             // top-left (shifted right)
+    ctx.lineTo(x + width, y);            // top-right
+    ctx.lineTo(x + width - skew, y + height); // bottom-right (shifted left)
+    ctx.lineTo(x, y + height);            // bottom-left
+    ctx.closePath();
+
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    if (item.text && !hideText) {
+        drawItemText(ctx, item, "rgba(255, 255, 255, 0.85)");
+    }
+}
+
+/**
+ * Draws a document shape — rectangle with a wavy bottom edge.
+ */
+function drawDocument(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+    hideText: boolean,
+): void {
+    const { x, y, width, height } = item;
+    const waveHeight = Math.min(height * 0.1, 16);
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + width, y);
+    ctx.lineTo(x + width, y + height - waveHeight);
+    // Wavy bottom — two quadratic curves
+    ctx.quadraticCurveTo(
+        x + width * 0.75, y + height + waveHeight * 0.5,
+        x + width / 2, y + height - waveHeight,
+    );
+    ctx.quadraticCurveTo(
+        x + width * 0.25, y + height - waveHeight * 2.5,
+        x, y + height - waveHeight,
+    );
+    ctx.closePath();
+
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    if (item.text && !hideText) {
+        const textItem = { ...item, height: height - waveHeight };
+        drawItemText(ctx, textItem, "rgba(255, 255, 255, 0.85)");
+    }
+}
+
+/**
+ * Draws a triangle — equilateral-ish triangle fitting the bounding box.
+ */
+function drawTriangle(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+    hideText: boolean,
+): void {
+    const { x, y, width, height } = item;
+
+    ctx.beginPath();
+    ctx.moveTo(x + width / 2, y);       // top center
+    ctx.lineTo(x + width, y + height);   // bottom right
+    ctx.lineTo(x, y + height);            // bottom left
+    ctx.closePath();
+
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+
+    if (item.text && !hideText) {
+        // Offset text lower since the triangle is widest at the bottom
+        const textItem = { ...item, y: y + height * 0.3, height: height * 0.6 };
+        drawItemText(ctx, textItem, "rgba(255, 255, 255, 0.85)");
+    }
+}
+
+/**
  * Word-wraps text into lines that fit within the given max width.
  */
 function wrapText(
@@ -214,6 +423,24 @@ export function drawItem(
             break;
         case "ellipse":
             drawEllipse(ctx, item, zoom, hideText);
+            break;
+        case "diamond":
+            drawDiamond(ctx, item, zoom, hideText);
+            break;
+        case "cylinder":
+            drawCylinder(ctx, item, zoom, hideText);
+            break;
+        case "hexagon":
+            drawHexagon(ctx, item, zoom, hideText);
+            break;
+        case "parallelogram":
+            drawParallelogram(ctx, item, zoom, hideText);
+            break;
+        case "document":
+            drawDocument(ctx, item, zoom, hideText);
+            break;
+        case "triangle":
+            drawTriangle(ctx, item, zoom, hideText);
             break;
     }
 }
