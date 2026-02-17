@@ -5,6 +5,7 @@
  *   - Pannable/zoomable camera with smooth zoom interpolation
  *   - Draggable items with selection
  *   - Tool-based item creation (sticky, rect, ellipse)
+ *   - Double-click to edit text on items
  *   - Undo/redo via command pattern (Ctrl+Z / Ctrl+Shift+Z)
  *   - World-space dot grid
  *   - Context-aware cursor styles
@@ -19,12 +20,18 @@ import type { Camera, DragMode, Item, ItemType, Point, ToolMode } from "../types
 import { screenToWorld, getVisibleBounds, zoomAtPoint } from "../utils/camera";
 import { hitTestItems } from "../utils/hitTest";
 import { History } from "../utils/history";
-import { CreateItemCommand, MoveItemCommand, DeleteItemCommand } from "../utils/commands";
+import {
+  CreateItemCommand,
+  MoveItemCommand,
+  DeleteItemCommand,
+  EditTextCommand,
+} from "../utils/commands";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
 import { drawItem, drawSelectionHighlight } from "../rendering/items";
 import { Toolbar } from "./Toolbar";
+import { TextEditor } from "./TextEditor";
 
 /** Interpolation speed for smooth zoom (0–1, higher = snappier). */
 const ZOOM_LERP_SPEED = 0.15;
@@ -74,6 +81,11 @@ export const FlowCanvas = () => {
   // ── Selection ───────────────────────────────────────────────────────
   const selectedId = useRef<number | null>(null);
 
+  // ── Text editing (React state — drives TextEditor rendering) ────────
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  /** Ref mirror of editingItem's ID so the render loop can access it. */
+  const editingIdRef = useRef<number | null>(null);
+
   // ── Undo/Redo ───────────────────────────────────────────────────────
   const history = useRef(new History());
 
@@ -94,6 +106,23 @@ export const FlowCanvas = () => {
   const handleToolChange = useCallback((tool: ToolMode) => {
     setActiveTool(tool);
     activeToolRef.current = tool;
+  }, []);
+
+  /** Called when the text editor commits a change. */
+  const handleTextCommit = useCallback((newText: string) => {
+    const item = editingItem;
+    if (item) {
+      const oldText = item.text;
+      history.current.push(new EditTextCommand(item, oldText, newText));
+    }
+    setEditingItem(null);
+    editingIdRef.current = null;
+  }, [editingItem]);
+
+  /** Called when the text editor is cancelled. */
+  const handleTextCancel = useCallback(() => {
+    setEditingItem(null);
+    editingIdRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -167,7 +196,6 @@ export const FlowCanvas = () => {
         const item = items.current.find((i) => i.id === selectedId.current);
         if (item) {
           const origin = itemDragOrigin.current;
-          // Only push a command if the item actually moved
           if (item.x !== origin.x || item.y !== origin.y) {
             const cmd = new MoveItemCommand(
               item,
@@ -176,15 +204,11 @@ export const FlowCanvas = () => {
               item.x,
               item.y,
             );
-            // Don't call cmd.execute() — item is already at the new position.
-            // Push it raw onto the undo stack.
             history.current.push({
               description: cmd.description,
               execute: () => cmd.execute(),
               undo: () => cmd.undo(),
             });
-            // The push() calls execute() which sets item to newX/newY —
-            // that's fine because item is already there.
           }
         }
       }
@@ -217,7 +241,6 @@ export const FlowCanvas = () => {
       if (e.ctrlKey && !e.shiftKey && e.key === "z") {
         e.preventDefault();
         history.current.undo();
-        // If undone item was selected but no longer exists, deselect
         if (
           selectedId.current !== null &&
           !items.current.find((i) => i.id === selectedId.current)
@@ -305,7 +328,7 @@ export const FlowCanvas = () => {
           item.y + item.height > bounds.top &&
           item.y < bounds.bottom
         ) {
-          drawItem(ctx, item, camera.current.z);
+          drawItem(ctx, item, camera.current.z, item.id === editingIdRef.current);
 
           if (item.id === selectedId.current) {
             drawSelectionHighlight(ctx, item, camera.current.z);
@@ -378,6 +401,9 @@ export const FlowCanvas = () => {
    * Pointer-down handler — dispatches to placement, item drag, or camera pan.
    */
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Ignore clicks while editing text
+    if (editingItem) return;
+
     const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
     const tool = activeToolRef.current;
 
@@ -386,7 +412,6 @@ export const FlowCanvas = () => {
       const newItem = buildItem(worldPos.x, worldPos.y, tool);
       history.current.push(new CreateItemCommand(items.current, newItem));
       selectedId.current = newItem.id;
-      // Switch back to select tool after placement
       activeToolRef.current = "select";
       setActiveTool("select");
       return;
@@ -403,7 +428,6 @@ export const FlowCanvas = () => {
         x: worldPos.x - hitItem.x,
         y: worldPos.y - hitItem.y,
       };
-      // Capture original position for undo
       itemDragOrigin.current = { x: hitItem.x, y: hitItem.y };
     } else {
       selectedId.current = null;
@@ -416,14 +440,37 @@ export const FlowCanvas = () => {
     }
   };
 
+  /**
+   * Double-click handler — opens the text editor on the clicked item.
+   */
+  const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
+    const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
+
+    if (hitItem) {
+      selectedId.current = hitItem.id;
+      setEditingItem(hitItem);
+      editingIdRef.current = hitItem.id;
+    }
+  };
+
   return (
     <>
       <canvas
         ref={canvasRef}
         onPointerDown={onPointerDown}
+        onDoubleClick={onDoubleClick}
         style={{ display: "block", touchAction: "none", cursor: "grab" }}
       />
       <Toolbar activeTool={activeTool} onToolChange={handleToolChange} />
+      {editingItem && (
+        <TextEditor
+          item={editingItem}
+          camera={camera.current}
+          onCommit={handleTextCommit}
+          onCancel={handleTextCancel}
+        />
+      )}
     </>
   );
 };

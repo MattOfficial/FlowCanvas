@@ -103,3 +103,30 @@ export class DeleteItemCommand implements Command {
         }
     }
 }
+
+/**
+ * Command: Edit an item's text content.
+ *
+ * Execute: sets item.text to the new value.
+ * Undo: restores item.text to the old value.
+ */
+export class EditTextCommand implements Command {
+    readonly description = "Edit text";
+    private item: Item;
+    private oldText: string;
+    private newText: string;
+
+    constructor(item: Item, oldText: string, newText: string) {
+        this.item = item;
+        this.oldText = oldText;
+        this.newText = newText;
+    }
+
+    execute(): void {
+        this.item.text = this.newText;
+    }
+
+    undo(): void {
+        this.item.text = this.oldText;
+    }
+}

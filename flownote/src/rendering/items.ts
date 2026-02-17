@@ -14,6 +14,12 @@ const STICKY_RADIUS = 8;
 /** Shadow blur for sticky notes. */
 const STICKY_SHADOW_BLUR = 12;
 
+/** Padding inside items for text rendering. */
+const TEXT_PADDING = 14;
+
+/** Line height multiplier for multi-line text. */
+const LINE_HEIGHT = 1.35;
+
 /**
  * Draws a rounded rectangle path (utility for sticky notes).
  */
@@ -46,6 +52,7 @@ function drawSticky(
     ctx: CanvasRenderingContext2D,
     item: Item,
     zoom: number,
+    hideText: boolean,
 ): void {
     ctx.save();
     ctx.shadowColor = "rgba(0, 0, 0, 0.25)";
@@ -58,9 +65,8 @@ function drawSticky(
     ctx.fill();
     ctx.restore();
 
-    // Draw text if present
-    if (item.text) {
-        drawItemText(ctx, item, zoom);
+    if (item.text && !hideText) {
+        drawItemText(ctx, item, "#1a1a2e");
     }
 }
 
@@ -71,6 +77,7 @@ function drawRect(
     ctx: CanvasRenderingContext2D,
     item: Item,
     zoom: number,
+    hideText: boolean,
 ): void {
     ctx.fillStyle = item.color;
     ctx.fillRect(item.x, item.y, item.width, item.height);
@@ -79,8 +86,8 @@ function drawRect(
     ctx.lineWidth = 1 / zoom;
     ctx.strokeRect(item.x, item.y, item.width, item.height);
 
-    if (item.text) {
-        drawItemText(ctx, item, zoom);
+    if (item.text && !hideText) {
+        drawItemText(ctx, item, "rgba(255, 255, 255, 0.85)");
     }
 }
 
@@ -91,6 +98,7 @@ function drawEllipse(
     ctx: CanvasRenderingContext2D,
     item: Item,
     zoom: number,
+    hideText: boolean,
 ): void {
     const cx = item.x + item.width / 2;
     const cy = item.y + item.height / 2;
@@ -106,33 +114,82 @@ function drawEllipse(
     ctx.lineWidth = 1 / zoom;
     ctx.stroke();
 
-    if (item.text) {
-        drawItemText(ctx, item, zoom);
+    if (item.text && !hideText) {
+        drawItemText(ctx, item, "rgba(255, 255, 255, 0.85)");
     }
 }
 
 /**
- * Draws centered text within an item's bounds.
+ * Word-wraps text into lines that fit within the given max width.
+ */
+function wrapText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number,
+): string[] {
+    const lines: string[] = [];
+    const paragraphs = text.split("\n");
+
+    for (const paragraph of paragraphs) {
+        if (paragraph === "") {
+            lines.push("");
+            continue;
+        }
+
+        const words = paragraph.split(" ");
+        let currentLine = "";
+
+        for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const metrics = ctx.measureText(testLine);
+
+            if (metrics.width > maxWidth && currentLine) {
+                lines.push(currentLine);
+                currentLine = word;
+            } else {
+                currentLine = testLine;
+            }
+        }
+
+        if (currentLine) {
+            lines.push(currentLine);
+        }
+    }
+
+    return lines;
+}
+
+/**
+ * Draws multi-line text within an item's bounds with word wrapping.
+ * Text is vertically centered within the item.
  */
 function drawItemText(
     ctx: CanvasRenderingContext2D,
     item: Item,
-    _zoom: number,
+    color: string,
 ): void {
-    const fontSize = Math.max(12, Math.min(16, item.height * 0.12));
+    const fontSize = Math.max(12, Math.min(16, item.height * 0.1));
     ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
-    ctx.fillStyle = "#1a1a2e";
+    ctx.fillStyle = color;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // Simple single-line text (multi-line can be added in Step 5)
-    const maxWidth = item.width - 16;
-    ctx.fillText(
-        item.text,
-        item.x + item.width / 2,
-        item.y + item.height / 2,
-        maxWidth,
-    );
+    const maxWidth = item.width - TEXT_PADDING * 2;
+    const lineSpacing = fontSize * LINE_HEIGHT;
+    const lines = wrapText(ctx, item.text, maxWidth);
+
+    // Vertically center the block of text
+    const totalTextHeight = lines.length * lineSpacing;
+    const startY = item.y + (item.height - totalTextHeight) / 2 + lineSpacing / 2;
+    const centerX = item.x + item.width / 2;
+
+    for (let i = 0; i < lines.length; i++) {
+        const lineY = startY + i * lineSpacing;
+        // Only draw lines that are within the item bounds
+        if (lineY > item.y && lineY < item.y + item.height) {
+            ctx.fillText(lines[i], centerX, lineY, maxWidth);
+        }
+    }
 
     // Reset alignment
     ctx.textAlign = "start";
@@ -146,22 +203,23 @@ export function drawItem(
     ctx: CanvasRenderingContext2D,
     item: Item,
     zoom: number,
+    hideText: boolean = false,
 ): void {
     switch (item.type) {
         case "sticky":
-            drawSticky(ctx, item, zoom);
+            drawSticky(ctx, item, zoom, hideText);
             break;
         case "rect":
-            drawRect(ctx, item, zoom);
+            drawRect(ctx, item, zoom, hideText);
             break;
         case "ellipse":
-            drawEllipse(ctx, item, zoom);
+            drawEllipse(ctx, item, zoom, hideText);
             break;
     }
 }
 
 /**
- * Draws a selection highlight around an item (white border).
+ * Draws a selection highlight around an item (dashed blue border).
  */
 export function drawSelectionHighlight(
     ctx: CanvasRenderingContext2D,
