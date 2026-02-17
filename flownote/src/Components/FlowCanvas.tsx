@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { Camera, DragMode, Item, ItemType, Point, ResizeHandle, ToolMode } from "../types";
+import type { Arrow, Camera, DragMode, Item, ItemType, Point, ResizeHandle, ToolMode } from "../types";
 import { screenToWorld, getVisibleBounds, zoomAtPoint } from "../utils/camera";
 import { hitTestItems } from "../utils/hitTest";
 import { History } from "../utils/history";
@@ -33,12 +33,15 @@ import {
   MultiMoveItemsCommand,
   MultiDeleteItemsCommand,
   ChangeColorCommand,
+  CreateArrowCommand,
+  DeleteArrowCommand,
 } from "../utils/commands";
 import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
 import { drawItem, drawSelectionHighlight, drawResizeHandles, hitTestResizeHandle, RESIZE_CURSORS } from "../rendering/items";
+import { drawArrow, drawArrowPreview, hitTestArrows } from "../rendering/arrows";
 import { Toolbar } from "./Toolbar";
 import { TextEditor } from "./TextEditor";
 import { ContextMenu, type ContextMenuAction } from "./ContextMenu";
@@ -142,7 +145,7 @@ export const FlowCanvas = () => {
 
   /** Triggers a debounced save of the current canvas state. */
   const triggerSave = () => {
-    debouncedSave.current(items.current, camera.current, nextId.current);
+    debouncedSave.current(items.current, arrows.current, camera.current, nextId.current);
   };
 
   // ── Debug mode (toggle with Ctrl+Shift+D) ───────────────────────────
@@ -154,15 +157,23 @@ export const FlowCanvas = () => {
 
   // ── World data ──────────────────────────────────────────────────────
   const items = useRef<Item[]>([]);
+  const arrows = useRef<Arrow[]>([]);
   const nextId = useRef(0);
   const cursor = useRef<Point>({ x: 0, y: 0 });
   const stickyColorIndex = useRef(0);
+
+  // ── Arrow creation state ────────────────────────────────────────────
+  const arrowFromId = useRef<number | null>(null);
+  const arrowFromPoint = useRef<Point>({ x: 0, y: 0 });
+  const arrowToPoint = useRef<Point>({ x: 0, y: 0 });
+  const selectedArrowId = useRef<number | null>(null);
 
   // ── Rehydrate from localStorage on mount ────────────────────────────
   useEffect(() => {
     const saved = loadState();
     if (saved) {
       items.current = saved.items;
+      arrows.current = saved.arrows ?? [];
       nextId.current = saved.nextId;
       camera.current = { ...saved.camera };
       targetCamera.current = { ...saved.camera };
@@ -309,6 +320,8 @@ export const FlowCanvas = () => {
         }
       } else if (dragModeRef.current === "marquee") {
         marqueeEnd.current = { ...cursor.current };
+      } else if (dragModeRef.current === "arrow") {
+        arrowToPoint.current = { ...cursor.current };
       }
     };
 
@@ -395,6 +408,41 @@ export const FlowCanvas = () => {
               : null;
           }
         }
+
+        if (dragModeRef.current === "arrow") {
+          // Finalize arrow creation
+          const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
+          const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
+          const toId = hitItem ? hitItem.id : null;
+
+          // Don't create self-connections
+          const fromId = arrowFromId.current;
+          if (fromId !== toId || (fromId === null && toId === null)) {
+            const from = arrowFromPoint.current;
+            const to = { ...arrowToPoint.current };
+            const dist = Math.hypot(to.x - from.x, to.y - from.y);
+
+            if (dist > 10) {
+              const newArrow: Arrow = {
+                id: nextId.current++,
+                fromId,
+                toId,
+                fromPoint: { ...from },
+                toPoint: to,
+                color: "rgba(255, 255, 255, 0.6)",
+                lineStyle: "solid",
+                headEnd: "arrow",
+                headStart: "none",
+              };
+              history.current.push(new CreateArrowCommand(arrows.current, newArrow));
+              selectedArrowId.current = newArrow.id;
+              selectedIds.current = new Set();
+              primarySelectedId.current = null;
+              triggerSave();
+            }
+          }
+          arrowFromId.current = null;
+        }
       }
 
       isDragging.current = false;
@@ -462,17 +510,36 @@ export const FlowCanvas = () => {
       // Delete selected items: Delete or Backspace
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
-        selectedIds.current.size > 0
+        (selectedIds.current.size > 0 || selectedArrowId.current !== null)
       ) {
         e.preventDefault();
-        const toDelete = items.current.filter((i) => selectedIds.current.has(i.id));
-        if (toDelete.length === 1) {
-          history.current.push(new DeleteItemCommand(items.current, toDelete[0]));
-        } else if (toDelete.length > 1) {
-          history.current.push(new MultiDeleteItemsCommand(items.current, toDelete));
+        // Delete selected items
+        if (selectedIds.current.size > 0) {
+          const toDelete = items.current.filter((i) => selectedIds.current.has(i.id));
+          if (toDelete.length === 1) {
+            history.current.push(new DeleteItemCommand(items.current, toDelete[0]));
+          } else if (toDelete.length > 1) {
+            history.current.push(new MultiDeleteItemsCommand(items.current, toDelete));
+          }
+          // Also delete any arrows connected to deleted items
+          const deletedIds = new Set(toDelete.map((i) => i.id));
+          const connectedArrows = arrows.current.filter(
+            (a) => (a.fromId !== null && deletedIds.has(a.fromId)) || (a.toId !== null && deletedIds.has(a.toId))
+          );
+          for (const a of connectedArrows) {
+            history.current.push(new DeleteArrowCommand(arrows.current, a));
+          }
+        }
+        // Delete selected arrow
+        if (selectedArrowId.current !== null) {
+          const arrow = arrows.current.find((a) => a.id === selectedArrowId.current);
+          if (arrow) {
+            history.current.push(new DeleteArrowCommand(arrows.current, arrow));
+          }
         }
         selectedIds.current = new Set();
         primarySelectedId.current = null;
+        selectedArrowId.current = null;
         triggerSave();
         return;
       }
@@ -605,6 +672,17 @@ export const FlowCanvas = () => {
         }
       }
 
+      // Draw arrows
+      for (const arrow of arrows.current) {
+        const isSelected = arrow.id === selectedArrowId.current;
+        drawArrow(ctx, arrow, items.current, camera.current.z, isSelected);
+      }
+
+      // Draw arrow preview while dragging
+      if (isDragging.current && dragModeRef.current === "arrow") {
+        drawArrowPreview(ctx, arrowFromPoint.current, arrowToPoint.current, camera.current.z);
+      }
+
       // Draw marquee rectangle
       if (isDragging.current && dragModeRef.current === "marquee") {
         const mx1 = Math.min(marqueeStart.current.x, marqueeEnd.current.x);
@@ -699,6 +777,20 @@ export const FlowCanvas = () => {
     const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
     const tool = activeToolRef.current;
 
+    // ── Arrow tool mode ─────────────────────────────────────────────
+    if (tool === "arrow") {
+      const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
+      arrowFromId.current = hitItem ? hitItem.id : null;
+      arrowFromPoint.current = { ...worldPos };
+      arrowToPoint.current = { ...worldPos };
+      isDragging.current = true;
+      dragModeRef.current = "arrow";
+      selectedIds.current = new Set();
+      primarySelectedId.current = null;
+      selectedArrowId.current = null;
+      return;
+    }
+
     // ── Placement mode: create a new item via command ────────────────
     if (tool !== "select") {
       const newItem = buildItem(worldPos.x, worldPos.y, tool);
@@ -768,10 +860,19 @@ export const FlowCanvas = () => {
         }
       }
     } else {
-      // Click on empty space
+      // Click on empty space — check for arrow hit first
+      const hitArrow = hitTestArrows(worldPos.x, worldPos.y, arrows.current, items.current, camera.current.z);
+      if (hitArrow) {
+        selectedArrowId.current = hitArrow.id;
+        selectedIds.current = new Set();
+        primarySelectedId.current = null;
+        return;
+      }
+
       if (!e.shiftKey) {
         selectedIds.current = new Set();
         primarySelectedId.current = null;
+        selectedArrowId.current = null;
         isDragging.current = true;
         dragModeRef.current = "marquee";
         marqueeStart.current = { ...worldPos };

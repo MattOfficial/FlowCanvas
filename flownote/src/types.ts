@@ -27,11 +27,38 @@ export type Item = {
     text: string;
 };
 
+/** Line style for arrows. */
+export type LineStyle = "solid" | "dashed" | "dotted";
+
+/** Arrow head style. */
+export type ArrowHead = "arrow" | "none";
+
+/** An arrow / connector between two items or two free-form points. */
+export type Arrow = {
+    id: number;
+    /** Connected item at the start (null for free-form). */
+    fromId: number | null;
+    /** Connected item at the end (null for free-form). */
+    toId: number | null;
+    /** World-space start point (raw position or computed from fromId). */
+    fromPoint: Point;
+    /** World-space end point (raw position or computed from toId). */
+    toPoint: Point;
+    /** Visual color. */
+    color: string;
+    /** Line style. */
+    lineStyle: LineStyle;
+    /** Head at the end of the arrow. */
+    headEnd: ArrowHead;
+    /** Head at the start of the arrow (for bidirectional). */
+    headStart: ArrowHead;
+};
+
 /** The current active tool mode. */
-export type ToolMode = "select" | "sticky" | "rect" | "ellipse" | "diamond" | "cylinder" | "hexagon" | "parallelogram" | "document" | "triangle";
+export type ToolMode = "select" | "arrow" | "sticky" | "rect" | "ellipse" | "diamond" | "cylinder" | "hexagon" | "parallelogram" | "document" | "triangle";
 
 /** The mutually exclusive drag interaction modes. */
-export type DragMode = "camera" | "item" | "resize" | "marquee";
+export type DragMode = "camera" | "item" | "resize" | "marquee" | "arrow";
 
 /** Identifies which resize handle is active. */
 export type ResizeHandle = "nw" | "ne" | "sw" | "se";

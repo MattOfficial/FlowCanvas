@@ -5,7 +5,7 @@
  * Commands are passed to `History.push()` for automatic undo/redo support.
  */
 
-import type { Item } from "../types";
+import type { Arrow, Item } from "../types";
 import type { Command } from "./history";
 
 /**
@@ -272,6 +272,55 @@ export class ChangeColorCommand implements Command {
     undo(): void {
         for (const e of this.entries) {
             e.item.color = e.oldColor;
+        }
+    }
+}
+
+/**
+ * Command: Create a new arrow on the canvas.
+ */
+export class CreateArrowCommand implements Command {
+    readonly description = "Create arrow";
+    private arrowsArray: Arrow[];
+    private arrow: Arrow;
+
+    constructor(arrowsArray: Arrow[], arrow: Arrow) {
+        this.arrowsArray = arrowsArray;
+        this.arrow = arrow;
+    }
+
+    execute(): void {
+        this.arrowsArray.push(this.arrow);
+    }
+
+    undo(): void {
+        const idx = this.arrowsArray.indexOf(this.arrow);
+        if (idx !== -1) this.arrowsArray.splice(idx, 1);
+    }
+}
+
+/**
+ * Command: Delete an arrow from the canvas.
+ */
+export class DeleteArrowCommand implements Command {
+    readonly description = "Delete arrow";
+    private arrowsArray: Arrow[];
+    private arrow: Arrow;
+    private index = -1;
+
+    constructor(arrowsArray: Arrow[], arrow: Arrow) {
+        this.arrowsArray = arrowsArray;
+        this.arrow = arrow;
+    }
+
+    execute(): void {
+        this.index = this.arrowsArray.indexOf(this.arrow);
+        if (this.index !== -1) this.arrowsArray.splice(this.index, 1);
+    }
+
+    undo(): void {
+        if (this.index !== -1) {
+            this.arrowsArray.splice(this.index, 0, this.arrow);
         }
     }
 }

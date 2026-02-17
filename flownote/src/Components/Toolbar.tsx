@@ -89,6 +89,16 @@ const tools: ToolDef[] = [
     { mode: "select", label: "Select", icon: <CursorIcon /> },
 ];
 
+const ArrowIcon = () => (
+    <svg viewBox="0 0 24 24">
+        <path d="M4 20L20 4M20 4H10M20 4V14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+);
+
+const connectorTools: ToolDef[] = [
+    { mode: "arrow", label: "Arrow", icon: <ArrowIcon /> },
+];
+
 const basicShapes: ToolDef[] = [
     { mode: "sticky", label: "Sticky Note", icon: <StickyIcon /> },
     { mode: "rect", label: "Rectangle", icon: <RectIcon /> },
@@ -124,6 +134,8 @@ export const Toolbar = ({ activeTool, onToolChange }: ToolbarProps) => {
     return (
         <div className="toolbar">
             {renderGroup(tools, activeTool, onToolChange)}
+            <div className="toolbar-separator" />
+            {renderGroup(connectorTools, activeTool, onToolChange)}
             <div className="toolbar-separator" />
             {renderGroup(basicShapes, activeTool, onToolChange)}
             <div className="toolbar-separator" />

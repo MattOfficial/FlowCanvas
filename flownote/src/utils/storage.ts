@@ -1,18 +1,19 @@
 /**
  * Canvas state persistence via localStorage.
  *
- * Saves and loads the full canvas state (items, camera, nextId) so
- * work is preserved across page reloads. Writes are debounced to
+ * Saves and loads the full canvas state (items, arrows, camera, nextId)
+ * so work is preserved across page reloads. Writes are debounced to
  * avoid excessive serialization on every frame or drag event.
  */
 
-import type { Camera, Item } from "../types";
+import type { Arrow, Camera, Item } from "../types";
 
 const STORAGE_KEY = "flownote-canvas";
 
 /** The shape of the data we persist. */
 interface CanvasState {
     items: Item[];
+    arrows: Arrow[];
     camera: Camera;
     nextId: number;
 }
@@ -20,9 +21,14 @@ interface CanvasState {
 /**
  * Saves the current canvas state to localStorage.
  */
-export function saveState(items: Item[], camera: Camera, nextId: number): void {
+export function saveState(
+    items: Item[],
+    arrows: Arrow[],
+    camera: Camera,
+    nextId: number,
+): void {
     try {
-        const state: CanvasState = { items, camera, nextId };
+        const state: CanvasState = { items, arrows, camera, nextId };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
         // Silently ignore quota errors
@@ -44,6 +50,11 @@ export function loadState(): CanvasState | null {
             return null;
         }
 
+        // Backwards compat: arrows may not exist in old saves
+        if (!Array.isArray(state.arrows)) {
+            state.arrows = [];
+        }
+
         return state;
     } catch {
         return null;
@@ -57,10 +68,10 @@ export function loadState(): CanvasState | null {
 export function createDebouncedSave(delayMs: number = 500) {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    return (items: Item[], camera: Camera, nextId: number) => {
+    return (items: Item[], arrows: Arrow[], camera: Camera, nextId: number) => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => {
-            saveState(items, camera, nextId);
+            saveState(items, arrows, camera, nextId);
             timer = null;
         }, delayMs);
     };
