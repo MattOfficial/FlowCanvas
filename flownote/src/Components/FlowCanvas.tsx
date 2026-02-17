@@ -4,6 +4,7 @@
  * Renders a full-viewport HTML canvas with:
  *   - Pannable/zoomable camera with smooth zoom interpolation
  *   - Draggable items with selection
+ *   - Tool-based item creation (sticky, rect, ellipse)
  *   - World-space dot grid
  *   - Context-aware cursor styles
  *   - Optional debug overlays (toggle with Ctrl+Shift+D)
@@ -12,22 +13,34 @@
  * canvas is driven entirely by a `requestAnimationFrame` loop.
  */
 
-import { useEffect, useRef } from "react";
-import type { Camera, DragMode, Item, Point } from "../types";
+import { useEffect, useRef, useState, useCallback } from "react";
+import type { Camera, DragMode, Item, ItemType, Point, ToolMode } from "../types";
 import { screenToWorld, getVisibleBounds, zoomAtPoint } from "../utils/camera";
 import { hitTestItems } from "../utils/hitTest";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
-
-/** Side length of every item square in world-space pixels. */
-const ITEM_SIZE = 50;
+import { drawItem, drawSelectionHighlight } from "../rendering/items";
+import { Toolbar } from "./Toolbar";
 
 /** Interpolation speed for smooth zoom (0–1, higher = snappier). */
 const ZOOM_LERP_SPEED = 0.15;
 
 /** Background color — warm dark neutral. */
 const BG_COLOR = "#1a1a2e";
+
+/** Default dimensions for new items by type. */
+const DEFAULT_SIZES: Record<ItemType, { width: number; height: number }> = {
+  sticky: { width: 200, height: 200 },
+  rect: { width: 180, height: 120 },
+  ellipse: { width: 160, height: 120 },
+};
+
+/** Pastel colors for sticky notes, cycling through these on creation. */
+const STICKY_COLORS = ["#FFEB3B", "#FF9800", "#4CAF50", "#2196F3", "#E91E63", "#9C27B0"];
+
+/** Default color for rect/ellipse items. */
+const SHAPE_COLOR = "rgba(255, 255, 255, 0.08)";
 
 /** Linear interpolation between two values. */
 function lerp(a: number, b: number, t: number): number {
@@ -38,10 +51,12 @@ export const FlowCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reqIdRef = useRef<number>(0);
 
+  // ── Tool state (React state — drives Toolbar re-renders) ───────────
+  const [activeTool, setActiveTool] = useState<ToolMode>("select");
+  const activeToolRef = useRef<ToolMode>("select");
+
   // ── Camera ──────────────────────────────────────────────────────────
-  /** The camera values currently being rendered (smoothly interpolated). */
   const camera = useRef<Camera>({ x: 100, y: 100, z: 1.5 });
-  /** The target camera values (set instantly by input, rendered toward). */
   const targetCamera = useRef<Camera>({ x: 100, y: 100, z: 1.5 });
 
   // ── Drag state ──────────────────────────────────────────────────────
@@ -57,13 +72,21 @@ export const FlowCanvas = () => {
   // ── Debug mode (toggle with Ctrl+Shift+D) ───────────────────────────
   const debugMode = useRef(false);
 
-  // ── FPS tracking (only active in debug mode) ────────────────────────
+  // ── FPS tracking ────────────────────────────────────────────────────
   const lastFrameTime = useRef<number>(0);
   const fps = useRef<number>(60);
 
   // ── World data ──────────────────────────────────────────────────────
   const items = useRef<Item[]>([]);
+  const nextId = useRef(0);
   const cursor = useRef<Point>({ x: 0, y: 0 });
+  const stickyColorIndex = useRef(0);
+
+  /** Keep the ref in sync when React state changes. */
+  const handleToolChange = useCallback((tool: ToolMode) => {
+    setActiveTool(tool);
+    activeToolRef.current = tool;
+  }, []);
 
   useEffect(() => {
     const dpr = window.devicePixelRatio || 1;
@@ -85,13 +108,21 @@ export const FlowCanvas = () => {
 
     // ── Cursor style helper ───────────────────────────────────────────
     const updateCursor = (e: PointerEvent) => {
+      const tool = activeToolRef.current;
+
       if (isDragging.current) {
         canvas.style.cursor =
           dragModeRef.current === "camera" ? "grabbing" : "move";
         return;
       }
+
+      if (tool !== "select") {
+        canvas.style.cursor = "crosshair";
+        return;
+      }
+
       const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
-      const hover = hitTestItems(worldPos.x, worldPos.y, items.current, ITEM_SIZE);
+      const hover = hitTestItems(worldPos.x, worldPos.y, items.current);
       canvas.style.cursor = hover ? "move" : "grab";
     };
 
@@ -107,7 +138,6 @@ export const FlowCanvas = () => {
         const dy = e.clientY - dragStart.current.y;
         camera.current.x = camStart.current.x + dx;
         camera.current.y = camStart.current.y + dy;
-        // Keep target in sync during pan so zoom lerp doesn't fight
         targetCamera.current.x = camera.current.x;
         targetCamera.current.y = camera.current.y;
       } else if (dragModeRef.current === "item" && selectedId.current !== null) {
@@ -128,7 +158,6 @@ export const FlowCanvas = () => {
     // ── Wheel: zoom ───────────────────────────────────────────────────
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Update the target — the render loop will smoothly interpolate
       targetCamera.current = zoomAtPoint(
         targetCamera.current,
         e.clientX,
@@ -137,11 +166,19 @@ export const FlowCanvas = () => {
       );
     };
 
-    // ── Keyboard: debug toggle ────────────────────────────────────────
+    // ── Keyboard ──────────────────────────────────────────────────────
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Debug toggle
       if (e.ctrlKey && e.shiftKey && e.key === "D") {
         e.preventDefault();
         debugMode.current = !debugMode.current;
+        return;
+      }
+      // Escape — return to select mode
+      if (e.key === "Escape") {
+        activeToolRef.current = "select";
+        setActiveTool("select");
+        selectedId.current = null;
       }
     };
 
@@ -149,24 +186,23 @@ export const FlowCanvas = () => {
     const render = (time: number) => {
       if (!ctx || !canvas) return;
 
-      // FPS calculation (exponential moving average)
+      // FPS
       const delta = time - lastFrameTime.current;
       lastFrameTime.current = time;
       fps.current = 0.9 * fps.current + 0.1 * (1000 / Math.max(delta, 0.001));
 
-      // ── Smooth zoom interpolation ─────────────────────────────────
+      // Smooth zoom interpolation
       camera.current.x = lerp(camera.current.x, targetCamera.current.x, ZOOM_LERP_SPEED);
       camera.current.y = lerp(camera.current.y, targetCamera.current.y, ZOOM_LERP_SPEED);
       camera.current.z = lerp(camera.current.z, targetCamera.current.z, ZOOM_LERP_SPEED);
 
-      // Snap when close enough to avoid endless micro-animations
       if (Math.abs(camera.current.z - targetCamera.current.z) < 0.0001) {
         camera.current.x = targetCamera.current.x;
         camera.current.y = targetCamera.current.y;
         camera.current.z = targetCamera.current.z;
       }
 
-      // Reset transform and clear
+      // Clear
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const logicalWidth = canvas.width / dpr;
       const logicalHeight = canvas.height / dpr;
@@ -174,38 +210,33 @@ export const FlowCanvas = () => {
       ctx.fillStyle = BG_COLOR;
       ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
-      // Compute visible bounds for frustum culling
       const bounds = getVisibleBounds(camera.current, logicalWidth, logicalHeight);
 
-      // ── World-space drawing (affected by camera) ──────────────────
+      // ── World-space ─────────────────────────────────────────────────
       ctx.save();
       ctx.translate(camera.current.x, camera.current.y);
       ctx.scale(camera.current.z, camera.current.z);
 
       drawGrid(ctx, camera.current, logicalWidth, logicalHeight);
 
-      // Draw items (only those within the viewport)
+      // Draw items (frustum-culled)
       for (let i = 0; i < items.current.length; i++) {
         const item = items.current[i];
         if (
-          item.x + ITEM_SIZE > bounds.left &&
+          item.x + item.width > bounds.left &&
           item.x < bounds.right &&
-          item.y + ITEM_SIZE > bounds.top &&
+          item.y + item.height > bounds.top &&
           item.y < bounds.bottom
         ) {
-          ctx.fillStyle = item.color;
-          ctx.fillRect(item.x, item.y, ITEM_SIZE, ITEM_SIZE);
+          drawItem(ctx, item, camera.current.z);
 
-          // Selection highlight
           if (item.id === selectedId.current) {
-            ctx.strokeStyle = "#ffffff";
-            ctx.lineWidth = 4 / camera.current.z;
-            ctx.strokeRect(item.x, item.y, ITEM_SIZE, ITEM_SIZE);
+            drawSelectionHighlight(ctx, item, camera.current.z);
           }
         }
       }
 
-      // ── Debug overlays (only when debug mode is active) ───────────
+      // Debug overlays
       if (debugMode.current) {
         drawCrosshair(ctx, cursor.current, camera.current.z);
         drawOriginAxes(ctx, camera.current.z);
@@ -213,7 +244,7 @@ export const FlowCanvas = () => {
 
       ctx.restore();
 
-      // ── Screen-space drawing ──────────────────────────────────────
+      // ── Screen-space ────────────────────────────────────────────────
       if (debugMode.current) {
         drawHUD(ctx, fps.current, camera.current.z, cursor.current, logicalWidth);
       }
@@ -230,7 +261,6 @@ export const FlowCanvas = () => {
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     reqIdRef.current = requestAnimationFrame(render);
 
-    // ── Cleanup ───────────────────────────────────────────────────────
     return () => {
       window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", handleMove);
@@ -242,12 +272,53 @@ export const FlowCanvas = () => {
   }, []);
 
   /**
-   * Pointer-down handler — determines whether the user clicked an item
-   * (start item drag) or empty space (start camera pan).
+   * Creates a new item at the given world position with the current tool type.
+   */
+  const createItem = (worldX: number, worldY: number, type: ItemType): Item => {
+    const size = DEFAULT_SIZES[type];
+    let color: string;
+
+    if (type === "sticky") {
+      color = STICKY_COLORS[stickyColorIndex.current % STICKY_COLORS.length];
+      stickyColorIndex.current++;
+    } else {
+      color = SHAPE_COLOR;
+    }
+
+    const item: Item = {
+      id: nextId.current++,
+      type,
+      x: worldX - size.width / 2,
+      y: worldY - size.height / 2,
+      width: size.width,
+      height: size.height,
+      color,
+      text: "",
+    };
+
+    items.current.push(item);
+    return item;
+  };
+
+  /**
+   * Pointer-down handler — dispatches to placement, item drag, or camera pan.
    */
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
-    const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current, ITEM_SIZE);
+    const tool = activeToolRef.current;
+
+    // ── Placement mode: create a new item ───────────────────────────
+    if (tool === "sticky" || tool === "rect" || tool === "ellipse") {
+      const newItem = createItem(worldPos.x, worldPos.y, tool);
+      selectedId.current = newItem.id;
+      // Switch back to select tool after placement
+      activeToolRef.current = "select";
+      setActiveTool("select");
+      return;
+    }
+
+    // ── Select mode: hit test for items or start camera pan ─────────
+    const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
 
     if (hitItem) {
       selectedId.current = hitItem.id;
@@ -263,17 +334,19 @@ export const FlowCanvas = () => {
       dragModeRef.current = "camera";
       dragStart.current = { x: e.clientX, y: e.clientY };
       camStart.current = { x: camera.current.x, y: camera.current.y };
-      // Sync target on pan start
       targetCamera.current.x = camera.current.x;
       targetCamera.current.y = camera.current.y;
     }
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      onPointerDown={onPointerDown}
-      style={{ display: "block", touchAction: "none", cursor: "grab" }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        onPointerDown={onPointerDown}
+        style={{ display: "block", touchAction: "none", cursor: "grab" }}
+      />
+      <Toolbar activeTool={activeTool} onToolChange={handleToolChange} />
+    </>
   );
 };
