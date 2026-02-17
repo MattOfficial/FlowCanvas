@@ -246,3 +246,32 @@ export class MultiDeleteItemsCommand implements Command {
         }
     }
 }
+
+/**
+ * Command: Change the color of one or more items.
+ */
+export class ChangeColorCommand implements Command {
+    readonly description: string;
+    private entries: { item: Item; oldColor: string }[];
+    private newColor: string;
+
+    constructor(targets: Item[], newColor: string) {
+        this.newColor = newColor;
+        this.description = targets.length > 1
+            ? `Change color of ${targets.length} items`
+            : "Change color";
+        this.entries = targets.map((item) => ({ item, oldColor: item.color }));
+    }
+
+    execute(): void {
+        for (const e of this.entries) {
+            e.item.color = this.newColor;
+        }
+    }
+
+    undo(): void {
+        for (const e of this.entries) {
+            e.item.color = e.oldColor;
+        }
+    }
+}

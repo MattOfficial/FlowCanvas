@@ -32,6 +32,7 @@ import {
   ResizeItemCommand,
   MultiMoveItemsCommand,
   MultiDeleteItemsCommand,
+  ChangeColorCommand,
 } from "../utils/commands";
 import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
@@ -41,6 +42,7 @@ import { drawItem, drawSelectionHighlight, drawResizeHandles, hitTestResizeHandl
 import { Toolbar } from "./Toolbar";
 import { TextEditor } from "./TextEditor";
 import { ContextMenu, type ContextMenuAction } from "./ContextMenu";
+import { ColorPicker } from "./ColorPicker";
 
 /** Interpolation speed for smooth zoom (0–1, higher = snappier). */
 const ZOOM_LERP_SPEED = 0.15;
@@ -118,6 +120,12 @@ export const FlowCanvas = () => {
     x: number;
     y: number;
     actions: ContextMenuAction[];
+  } | null>(null);
+
+  // ── Color picker (React state) ──────────────────────────────────────
+  const [colorPicker, setColorPicker] = useState<{
+    x: number;
+    y: number;
   } | null>(null);
 
   // ── Undo/Redo ───────────────────────────────────────────────────────
@@ -825,6 +833,14 @@ export const FlowCanvas = () => {
         },
       });
 
+      actions.push({
+        label: "Change Color",
+        action: () => {
+          // Store the screen position for the color picker and close context menu
+          setColorPicker({ x: e.clientX, y: e.clientY });
+        },
+      });
+
       actions.push({ label: "---", action: () => { } });
 
       actions.push({
@@ -897,6 +913,25 @@ export const FlowCanvas = () => {
           y={contextMenu.y}
           actions={contextMenu.actions}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {colorPicker && (
+        <ColorPicker
+          x={colorPicker.x}
+          y={colorPicker.y}
+          currentColor={
+            primarySelectedId.current !== null
+              ? items.current.find((i) => i.id === primarySelectedId.current)?.color
+              : undefined
+          }
+          onSelect={(color) => {
+            const targets = items.current.filter((i) => selectedIds.current.has(i.id));
+            if (targets.length > 0) {
+              history.current.push(new ChangeColorCommand(targets, color));
+              triggerSave();
+            }
+          }}
+          onClose={() => setColorPicker(null)}
         />
       )}
     </>
