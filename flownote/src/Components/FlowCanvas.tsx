@@ -7,6 +7,7 @@
  *   - Tool-based item creation (sticky, rect, ellipse)
  *   - Double-click to edit text on items
  *   - Undo/redo via command pattern (Ctrl+Z / Ctrl+Shift+Z)
+ *   - Auto-save to localStorage (debounced)
  *   - World-space dot grid
  *   - Context-aware cursor styles
  *   - Optional debug overlays (toggle with Ctrl+Shift+D)
@@ -26,6 +27,7 @@ import {
   DeleteItemCommand,
   EditTextCommand,
 } from "../utils/commands";
+import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
@@ -89,6 +91,14 @@ export const FlowCanvas = () => {
   // ── Undo/Redo ───────────────────────────────────────────────────────
   const history = useRef(new History());
 
+  // ── Persistence ─────────────────────────────────────────────────────
+  const debouncedSave = useRef(createDebouncedSave(500));
+
+  /** Triggers a debounced save of the current canvas state. */
+  const triggerSave = () => {
+    debouncedSave.current(items.current, camera.current, nextId.current);
+  };
+
   // ── Debug mode (toggle with Ctrl+Shift+D) ───────────────────────────
   const debugMode = useRef(false);
 
@@ -102,6 +112,17 @@ export const FlowCanvas = () => {
   const cursor = useRef<Point>({ x: 0, y: 0 });
   const stickyColorIndex = useRef(0);
 
+  // ── Rehydrate from localStorage on mount ────────────────────────────
+  useEffect(() => {
+    const saved = loadState();
+    if (saved) {
+      items.current = saved.items;
+      nextId.current = saved.nextId;
+      camera.current = { ...saved.camera };
+      targetCamera.current = { ...saved.camera };
+    }
+  }, []);
+
   /** Keep the ref in sync when React state changes. */
   const handleToolChange = useCallback((tool: ToolMode) => {
     setActiveTool(tool);
@@ -114,6 +135,7 @@ export const FlowCanvas = () => {
     if (item) {
       const oldText = item.text;
       history.current.push(new EditTextCommand(item, oldText, newText));
+      triggerSave();
     }
     setEditingItem(null);
     editingIdRef.current = null;
@@ -209,6 +231,7 @@ export const FlowCanvas = () => {
               execute: () => cmd.execute(),
               undo: () => cmd.undo(),
             });
+            triggerSave();
           }
         }
       }
@@ -241,6 +264,7 @@ export const FlowCanvas = () => {
       if (e.ctrlKey && !e.shiftKey && e.key === "z") {
         e.preventDefault();
         history.current.undo();
+        triggerSave();
         if (
           selectedId.current !== null &&
           !items.current.find((i) => i.id === selectedId.current)
@@ -257,6 +281,7 @@ export const FlowCanvas = () => {
       ) {
         e.preventDefault();
         history.current.redo();
+        triggerSave();
         return;
       }
 
@@ -270,6 +295,7 @@ export const FlowCanvas = () => {
           e.preventDefault();
           history.current.push(new DeleteItemCommand(items.current, item));
           selectedId.current = null;
+          triggerSave();
         }
         return;
       }
@@ -414,6 +440,7 @@ export const FlowCanvas = () => {
       selectedId.current = newItem.id;
       activeToolRef.current = "select";
       setActiveTool("select");
+      triggerSave();
       return;
     }
 
