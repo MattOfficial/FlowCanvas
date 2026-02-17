@@ -4,8 +4,8 @@
  * Renders a full-viewport HTML canvas with:
  *   - Pannable/zoomable camera
  *   - Draggable items with selection
- *   - World-space grid, origin axes, and cursor crosshair
- *   - Screen-space debug HUD (FPS, zoom, coordinates)
+ *   - World-space grid
+ *   - Optional debug overlays (toggle with Ctrl+Shift+D)
  *
  * All mutable state lives in refs to avoid React re-renders — the
  * canvas is driven entirely by a `requestAnimationFrame` loop.
@@ -21,32 +21,6 @@ import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
 
 /** Side length of every item square in world-space pixels. */
 const ITEM_SIZE = 50;
-
-/** Number of stress-test items to generate on first mount. */
-const ITEM_COUNT = 1000;
-
-/** Palette used when generating random items. */
-const ITEM_COLORS = ["#ff5555", "#55ff55", "#5555ff", "#ffff55", "#ff55ff", "#55ffff"];
-
-/** World-space spread range for randomly placed items (±2000). */
-const WORLD_SPREAD = 4000;
-
-/**
- * Generates an array of randomly positioned and colored items
- * scattered across the world for stress-testing the canvas.
- */
-function generateItems(count: number): Item[] {
-  const result: Item[] = [];
-  for (let i = 0; i < count; i++) {
-    result.push({
-      id: i,
-      x: Math.random() * WORLD_SPREAD - WORLD_SPREAD / 2,
-      y: Math.random() * WORLD_SPREAD - WORLD_SPREAD / 2,
-      color: ITEM_COLORS[Math.floor(Math.random() * ITEM_COLORS.length)],
-    });
-  }
-  return result;
-}
 
 export const FlowCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,7 +39,10 @@ export const FlowCanvas = () => {
   // ── Selection ───────────────────────────────────────────────────────
   const selectedId = useRef<number | null>(null);
 
-  // ── FPS tracking ────────────────────────────────────────────────────
+  // ── Debug mode (toggle with Ctrl+Shift+D) ───────────────────────────
+  const debugMode = useRef(false);
+
+  // ── FPS tracking (only active in debug mode) ────────────────────────
   const lastFrameTime = useRef<number>(0);
   const fps = useRef<number>(60);
 
@@ -122,10 +99,13 @@ export const FlowCanvas = () => {
       camera.current = zoomAtPoint(camera.current, e.clientX, e.clientY, e.deltaY);
     };
 
-    // ── Generate items on first mount ─────────────────────────────────
-    if (items.current.length === 0) {
-      items.current = generateItems(ITEM_COUNT);
-    }
+    // ── Keyboard: debug toggle ────────────────────────────────────────
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === "D") {
+        e.preventDefault();
+        debugMode.current = !debugMode.current;
+      }
+    };
 
     // ── Render loop ───────────────────────────────────────────────────
     const render = (time: number) => {
@@ -175,17 +155,18 @@ export const FlowCanvas = () => {
         }
       }
 
-      drawCrosshair(ctx, cursor.current, camera.current.z);
-      drawOriginAxes(ctx, camera.current.z);
-
-      // Reference square at (50, 50)
-      ctx.fillStyle = "#5588ff";
-      ctx.fillRect(50, 50, ITEM_SIZE, ITEM_SIZE);
+      // ── Debug overlays (only when debug mode is active) ───────────
+      if (debugMode.current) {
+        drawCrosshair(ctx, cursor.current, camera.current.z);
+        drawOriginAxes(ctx, camera.current.z);
+      }
 
       ctx.restore();
 
-      // ── Screen-space drawing (fixed position HUD) ─────────────────
-      drawHUD(ctx, fps.current, camera.current.z, cursor.current, logicalWidth);
+      // ── Screen-space drawing ──────────────────────────────────────
+      if (debugMode.current) {
+        drawHUD(ctx, fps.current, camera.current.z, cursor.current, logicalWidth);
+      }
 
       reqIdRef.current = requestAnimationFrame(render);
     };
@@ -195,6 +176,7 @@ export const FlowCanvas = () => {
     window.addEventListener("resize", resize);
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
+    window.addEventListener("keydown", handleKeyDown);
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     reqIdRef.current = requestAnimationFrame(render);
 
@@ -203,6 +185,7 @@ export const FlowCanvas = () => {
       window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("keydown", handleKeyDown);
       canvas.removeEventListener("wheel", handleWheel);
       cancelAnimationFrame(reqIdRef.current);
     };
