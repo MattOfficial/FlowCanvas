@@ -6,7 +6,7 @@
  * to already be applied to the context.
  */
 
-import type { Item } from "../types";
+import type { Item, ResizeHandle } from "../types";
 
 /** Corner radius for sticky notes (world-space pixels). */
 const STICKY_RADIUS = 8;
@@ -243,3 +243,75 @@ export function drawSelectionHighlight(
 
     ctx.setLineDash([]);
 }
+
+/** Size of resize handles in screen pixels. */
+const HANDLE_SIZE = 8;
+
+/**
+ * Returns the four corner handle positions for an item.
+ */
+function getHandlePositions(item: Item) {
+    return {
+        nw: { x: item.x, y: item.y },
+        ne: { x: item.x + item.width, y: item.y },
+        sw: { x: item.x, y: item.y + item.height },
+        se: { x: item.x + item.width, y: item.y + item.height },
+    };
+}
+
+/**
+ * Draws small blue squares at the four corners of a selected item
+ * as resize grab handles.
+ */
+export function drawResizeHandles(
+    ctx: CanvasRenderingContext2D,
+    item: Item,
+    zoom: number,
+): void {
+    const half = HANDLE_SIZE / 2 / zoom;
+    const handles = getHandlePositions(item);
+
+    ctx.fillStyle = "#4a9eff";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1 / zoom;
+
+    for (const pos of Object.values(handles)) {
+        ctx.fillRect(pos.x - half, pos.y - half, half * 2, half * 2);
+        ctx.strokeRect(pos.x - half, pos.y - half, half * 2, half * 2);
+    }
+}
+
+/**
+ * Tests if a world-space point lands on one of the four corner resize handles.
+ * Returns the handle identifier or null if none was hit.
+ */
+export function hitTestResizeHandle(
+    worldX: number,
+    worldY: number,
+    item: Item,
+    zoom: number,
+): ResizeHandle | null {
+    const half = HANDLE_SIZE / 2 / zoom;
+    const handles = getHandlePositions(item);
+
+    for (const [key, pos] of Object.entries(handles)) {
+        if (
+            worldX >= pos.x - half &&
+            worldX <= pos.x + half &&
+            worldY >= pos.y - half &&
+            worldY <= pos.y + half
+        ) {
+            return key as ResizeHandle;
+        }
+    }
+
+    return null;
+}
+
+/** Maps a resize handle to the appropriate CSS cursor style. */
+export const RESIZE_CURSORS: Record<ResizeHandle, string> = {
+    nw: "nwse-resize",
+    se: "nwse-resize",
+    ne: "nesw-resize",
+    sw: "nesw-resize",
+};

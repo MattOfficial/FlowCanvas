@@ -31,7 +31,10 @@ export type Item = {
 export type ToolMode = "select" | "sticky" | "rect" | "ellipse";
 
 /** The mutually exclusive drag interaction modes. */
-export type DragMode = "camera" | "item";
+export type DragMode = "camera" | "item" | "resize";
+
+/** Identifies which resize handle is active. */
+export type ResizeHandle = "nw" | "ne" | "sw" | "se";
 
 /** An axis-aligned bounding box in world space. */
 export type WorldBounds = {

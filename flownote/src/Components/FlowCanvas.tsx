@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { Camera, DragMode, Item, ItemType, Point, ToolMode } from "../types";
+import type { Camera, DragMode, Item, ItemType, Point, ResizeHandle, ToolMode } from "../types";
 import { screenToWorld, getVisibleBounds, zoomAtPoint } from "../utils/camera";
 import { hitTestItems } from "../utils/hitTest";
 import { History } from "../utils/history";
@@ -26,12 +26,13 @@ import {
   MoveItemCommand,
   DeleteItemCommand,
   EditTextCommand,
+  ResizeItemCommand,
 } from "../utils/commands";
 import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
-import { drawItem, drawSelectionHighlight } from "../rendering/items";
+import { drawItem, drawSelectionHighlight, drawResizeHandles, hitTestResizeHandle, RESIZE_CURSORS } from "../rendering/items";
 import { Toolbar } from "./Toolbar";
 import { TextEditor } from "./TextEditor";
 
@@ -50,6 +51,9 @@ const DEFAULT_SIZES: Record<ItemType, { width: number; height: number }> = {
 
 /** Pastel colors for sticky notes, cycling through these on creation. */
 const STICKY_COLORS = ["#FFEB3B", "#FF9800", "#4CAF50", "#2196F3", "#E91E63", "#9C27B0"];
+
+/** Minimum item size when resizing (world-space pixels). */
+const MIN_ITEM_SIZE = 40;
 
 /** Default color for rect/ellipse items. */
 const SHAPE_COLOR = "rgba(255, 255, 255, 0.08)";
@@ -79,6 +83,11 @@ export const FlowCanvas = () => {
   const dragOffset = useRef<Point>({ x: 0, y: 0 });
   /** Original position of an item when drag starts (for MoveItemCommand). */
   const itemDragOrigin = useRef<Point>({ x: 0, y: 0 });
+
+  // ── Resize state ─────────────────────────────────────────────────────
+  const activeHandle = useRef<ResizeHandle | null>(null);
+  /** Original bounding box when resize drag starts. */
+  const resizeOrigin = useRef({ x: 0, y: 0, w: 0, h: 0 });
 
   // ── Selection ───────────────────────────────────────────────────────
   const selectedId = useRef<number | null>(null);
@@ -165,13 +174,15 @@ export const FlowCanvas = () => {
       ctx.scale(dpr, dpr);
     };
 
-    // ── Cursor style helper ───────────────────────────────────────────
+    // ── Cursor style helper ───────────────────────────────────────
     const updateCursor = (e: PointerEvent) => {
       const tool = activeToolRef.current;
 
       if (isDragging.current) {
-        canvas.style.cursor =
-          dragModeRef.current === "camera" ? "grabbing" : "move";
+        if (dragModeRef.current === "camera") canvas.style.cursor = "grabbing";
+        else if (dragModeRef.current === "resize" && activeHandle.current)
+          canvas.style.cursor = RESIZE_CURSORS[activeHandle.current];
+        else canvas.style.cursor = "move";
         return;
       }
 
@@ -181,6 +192,19 @@ export const FlowCanvas = () => {
       }
 
       const worldPos = screenToWorld(e.clientX, e.clientY, camera.current);
+
+      // Check resize handles first on the selected item
+      if (selectedId.current !== null) {
+        const selItem = items.current.find((i) => i.id === selectedId.current);
+        if (selItem) {
+          const handle = hitTestResizeHandle(worldPos.x, worldPos.y, selItem, camera.current.z);
+          if (handle) {
+            canvas.style.cursor = RESIZE_CURSORS[handle];
+            return;
+          }
+        }
+      }
+
       const hover = hitTestItems(worldPos.x, worldPos.y, items.current);
       canvas.style.cursor = hover ? "move" : "grab";
     };
@@ -205,18 +229,48 @@ export const FlowCanvas = () => {
           item.x = cursor.current.x - dragOffset.current.x;
           item.y = cursor.current.y - dragOffset.current.y;
         }
+      } else if (dragModeRef.current === "resize" && selectedId.current !== null && activeHandle.current) {
+        const item = items.current.find((i) => i.id === selectedId.current);
+        if (item) {
+          const orig = resizeOrigin.current;
+          const handle = activeHandle.current;
+          const wx = cursor.current.x;
+          const wy = cursor.current.y;
+
+          let newX = item.x, newY = item.y, newW = item.width, newH = item.height;
+
+          if (handle === "se") {
+            newW = Math.max(MIN_ITEM_SIZE, wx - orig.x);
+            newH = Math.max(MIN_ITEM_SIZE, wy - orig.y);
+          } else if (handle === "sw") {
+            newW = Math.max(MIN_ITEM_SIZE, (orig.x + orig.w) - wx);
+            newH = Math.max(MIN_ITEM_SIZE, wy - orig.y);
+            newX = (orig.x + orig.w) - newW;
+          } else if (handle === "ne") {
+            newW = Math.max(MIN_ITEM_SIZE, wx - orig.x);
+            newH = Math.max(MIN_ITEM_SIZE, (orig.y + orig.h) - wy);
+            newY = (orig.y + orig.h) - newH;
+          } else if (handle === "nw") {
+            newW = Math.max(MIN_ITEM_SIZE, (orig.x + orig.w) - wx);
+            newH = Math.max(MIN_ITEM_SIZE, (orig.y + orig.h) - wy);
+            newX = (orig.x + orig.w) - newW;
+            newY = (orig.y + orig.h) - newH;
+          }
+
+          item.x = newX;
+          item.y = newY;
+          item.width = newW;
+          item.height = newH;
+        }
       }
     };
 
-    // ── Pointer: up — finalize item drag as a MoveItemCommand ─────────
+    // ── Pointer: up — finalize drag commands ─────────────────────────
     const handleUp = (e: PointerEvent) => {
-      if (
-        isDragging.current &&
-        dragModeRef.current === "item" &&
-        selectedId.current !== null
-      ) {
+      if (isDragging.current && selectedId.current !== null) {
         const item = items.current.find((i) => i.id === selectedId.current);
-        if (item) {
+
+        if (item && dragModeRef.current === "item") {
           const origin = itemDragOrigin.current;
           if (item.x !== origin.x || item.y !== origin.y) {
             const cmd = new MoveItemCommand(
@@ -233,6 +287,27 @@ export const FlowCanvas = () => {
             });
             triggerSave();
           }
+        }
+
+        if (item && dragModeRef.current === "resize") {
+          const orig = resizeOrigin.current;
+          if (
+            item.x !== orig.x || item.y !== orig.y ||
+            item.width !== orig.w || item.height !== orig.h
+          ) {
+            const cmd = new ResizeItemCommand(
+              item,
+              orig.x, orig.y, orig.w, orig.h,
+              item.x, item.y, item.width, item.height,
+            );
+            history.current.push({
+              description: cmd.description,
+              execute: () => cmd.execute(),
+              undo: () => cmd.undo(),
+            });
+            triggerSave();
+          }
+          activeHandle.current = null;
         }
       }
 
@@ -358,6 +433,7 @@ export const FlowCanvas = () => {
 
           if (item.id === selectedId.current) {
             drawSelectionHighlight(ctx, item, camera.current.z);
+            drawResizeHandles(ctx, item, camera.current.z);
           }
         }
       }
@@ -444,7 +520,28 @@ export const FlowCanvas = () => {
       return;
     }
 
-    // ── Select mode: hit test for items or start camera pan ─────────
+    // ── Select mode: check resize handles, then items, then camera pan ──
+    // First: check if clicking a resize handle on the selected item
+    if (selectedId.current !== null) {
+      const selItem = items.current.find((i) => i.id === selectedId.current);
+      if (selItem) {
+        const handle = hitTestResizeHandle(worldPos.x, worldPos.y, selItem, camera.current.z);
+        if (handle) {
+          isDragging.current = true;
+          dragModeRef.current = "resize";
+          activeHandle.current = handle;
+          resizeOrigin.current = {
+            x: selItem.x,
+            y: selItem.y,
+            w: selItem.width,
+            h: selItem.height,
+          };
+          return;
+        }
+      }
+    }
+
+    // Then: hit test for items
     const hitItem = hitTestItems(worldPos.x, worldPos.y, items.current);
 
     if (hitItem) {

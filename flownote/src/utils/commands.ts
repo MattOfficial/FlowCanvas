@@ -130,3 +130,52 @@ export class EditTextCommand implements Command {
         this.item.text = this.oldText;
     }
 }
+
+/**
+ * Command: Resize (and potentially reposition) an item.
+ *
+ * Captures the full bounding box before and after so that both
+ * position and size are restored on undo.
+ */
+export class ResizeItemCommand implements Command {
+    readonly description = "Resize item";
+    private item: Item;
+    private oldX: number;
+    private oldY: number;
+    private oldW: number;
+    private oldH: number;
+    private newX: number;
+    private newY: number;
+    private newW: number;
+    private newH: number;
+
+    constructor(
+        item: Item,
+        oldX: number, oldY: number, oldW: number, oldH: number,
+        newX: number, newY: number, newW: number, newH: number,
+    ) {
+        this.item = item;
+        this.oldX = oldX;
+        this.oldY = oldY;
+        this.oldW = oldW;
+        this.oldH = oldH;
+        this.newX = newX;
+        this.newY = newY;
+        this.newW = newW;
+        this.newH = newH;
+    }
+
+    execute(): void {
+        this.item.x = this.newX;
+        this.item.y = this.newY;
+        this.item.width = this.newW;
+        this.item.height = this.newH;
+    }
+
+    undo(): void {
+        this.item.x = this.oldX;
+        this.item.y = this.oldY;
+        this.item.width = this.oldW;
+        this.item.height = this.oldH;
+    }
+}
