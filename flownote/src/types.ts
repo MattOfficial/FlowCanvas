@@ -52,6 +52,8 @@ export type Arrow = {
     headEnd: ArrowHead;
     /** Head at the start of the arrow (for bidirectional). */
     headStart: ArrowHead;
+    /** Optional text label displayed at the midpoint of the arrow. */
+    label: string;
 };
 
 /** The current active tool mode. */

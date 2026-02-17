@@ -35,6 +35,8 @@ import {
   ChangeColorCommand,
   CreateArrowCommand,
   DeleteArrowCommand,
+  ChangeArrowStyleCommand,
+  EditArrowLabelCommand,
 } from "../utils/commands";
 import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
@@ -433,6 +435,7 @@ export const FlowCanvas = () => {
                 lineStyle: "solid",
                 headEnd: "arrow",
                 headStart: "none",
+                label: "",
               };
               history.current.push(new CreateArrowCommand(arrows.current, newArrow));
               selectedArrowId.current = newArrow.id;
@@ -893,6 +896,17 @@ export const FlowCanvas = () => {
       primarySelectedId.current = hitItem.id;
       setEditingItem(hitItem);
       editingIdRef.current = hitItem.id;
+      return;
+    }
+
+    // Double-click on arrow → edit label
+    const hitArrow = hitTestArrows(worldPos.x, worldPos.y, arrows.current, items.current, camera.current.z);
+    if (hitArrow) {
+      const newLabel = prompt("Arrow label:", hitArrow.label);
+      if (newLabel !== null && newLabel !== hitArrow.label) {
+        history.current.push(new EditArrowLabelCommand(hitArrow, hitArrow.label, newLabel));
+        triggerSave();
+      }
     }
   };
 
@@ -980,17 +994,104 @@ export const FlowCanvas = () => {
         },
       });
     } else {
-      // Right-clicked on empty space
-      actions.push({
-        label: "Select All",
-        shortcut: "Ctrl+A",
-        action: () => {
-          selectedIds.current = new Set(items.current.map((i) => i.id));
-          primarySelectedId.current = items.current.length > 0
-            ? items.current[items.current.length - 1].id
-            : null;
-        },
-      });
+      // Right-clicked on empty space — check for arrow first
+      const hitArrow = hitTestArrows(worldPos.x, worldPos.y, arrows.current, items.current, camera.current.z);
+      if (hitArrow) {
+        selectedArrowId.current = hitArrow.id;
+        selectedIds.current = new Set();
+        primarySelectedId.current = null;
+
+        // Line style submenu
+        const lineStyles: Array<{ label: string; value: string }> = [
+          { label: "Solid", value: "solid" },
+          { label: "Dashed", value: "dashed" },
+          { label: "Dotted", value: "dotted" },
+        ];
+        for (const ls of lineStyles) {
+          actions.push({
+            label: `${hitArrow.lineStyle === ls.value ? "✓ " : "  "}${ls.label}`,
+            action: () => {
+              if (hitArrow.lineStyle !== ls.value) {
+                history.current.push(new ChangeArrowStyleCommand(hitArrow, "lineStyle", ls.value));
+                triggerSave();
+              }
+            },
+          });
+        }
+
+        actions.push({ label: "---", action: () => { } });
+
+        // Direction options
+        const directions: Array<{ label: string; headEnd: string; headStart: string }> = [
+          { label: "→  End only", headEnd: "arrow", headStart: "none" },
+          { label: "←  Start only", headEnd: "none", headStart: "arrow" },
+          { label: "↔  Both ends", headEnd: "arrow", headStart: "arrow" },
+          { label: "—  No heads", headEnd: "none", headStart: "none" },
+        ];
+        for (const d of directions) {
+          const isCurrent = hitArrow.headEnd === d.headEnd && hitArrow.headStart === d.headStart;
+          actions.push({
+            label: `${isCurrent ? "✓ " : "  "}${d.label}`,
+            action: () => {
+              if (hitArrow.headEnd !== d.headEnd) {
+                history.current.push(new ChangeArrowStyleCommand(hitArrow, "headEnd", d.headEnd));
+              }
+              if (hitArrow.headStart !== d.headStart) {
+                history.current.push(new ChangeArrowStyleCommand(hitArrow, "headStart", d.headStart));
+              }
+              triggerSave();
+            },
+          });
+        }
+
+        actions.push({ label: "---", action: () => { } });
+
+        // Edit label
+        actions.push({
+          label: hitArrow.label ? "Edit Label" : "Add Label",
+          action: () => {
+            const newLabel = prompt("Arrow label:", hitArrow.label);
+            if (newLabel !== null && newLabel !== hitArrow.label) {
+              history.current.push(new EditArrowLabelCommand(hitArrow, hitArrow.label, newLabel));
+              triggerSave();
+            }
+          },
+        });
+
+        // Change color
+        actions.push({
+          label: "Change Color",
+          action: () => {
+            setColorPicker({ x: e.clientX, y: e.clientY });
+          },
+        });
+
+        actions.push({ label: "---", action: () => { } });
+
+        // Delete
+        actions.push({
+          label: "Delete Arrow",
+          shortcut: "Del",
+          danger: true,
+          action: () => {
+            history.current.push(new DeleteArrowCommand(arrows.current, hitArrow));
+            selectedArrowId.current = null;
+            triggerSave();
+          },
+        });
+      } else {
+        // Truly empty space
+        actions.push({
+          label: "Select All",
+          shortcut: "Ctrl+A",
+          action: () => {
+            selectedIds.current = new Set(items.current.map((i) => i.id));
+            primarySelectedId.current = items.current.length > 0
+              ? items.current[items.current.length - 1].id
+              : null;
+          },
+        });
+      }
     }
 
     setContextMenu({ x: e.clientX, y: e.clientY, actions });
@@ -1027,11 +1128,23 @@ export const FlowCanvas = () => {
           x={colorPicker.x}
           y={colorPicker.y}
           currentColor={
-            primarySelectedId.current !== null
-              ? items.current.find((i) => i.id === primarySelectedId.current)?.color
-              : undefined
+            selectedArrowId.current !== null
+              ? arrows.current.find((a) => a.id === selectedArrowId.current)?.color
+              : primarySelectedId.current !== null
+                ? items.current.find((i) => i.id === primarySelectedId.current)?.color
+                : undefined
           }
           onSelect={(color) => {
+            // Arrow color change
+            if (selectedArrowId.current !== null) {
+              const arrow = arrows.current.find((a) => a.id === selectedArrowId.current);
+              if (arrow) {
+                history.current.push(new ChangeArrowStyleCommand(arrow, "color", color));
+                triggerSave();
+              }
+              return;
+            }
+            // Item color change
             const targets = items.current.filter((i) => selectedIds.current.has(i.id));
             if (targets.length > 0) {
               history.current.push(new ChangeColorCommand(targets, color));

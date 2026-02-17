@@ -324,3 +324,53 @@ export class DeleteArrowCommand implements Command {
         }
     }
 }
+
+/**
+ * Command: Change an arrow's visual style (lineStyle, headEnd, headStart, color).
+ */
+export class ChangeArrowStyleCommand implements Command {
+    readonly description = "Change arrow style";
+    private arrow: Arrow;
+    private prop: "lineStyle" | "headEnd" | "headStart" | "color";
+    private oldValue: string;
+    private newValue: string;
+
+    constructor(arrow: Arrow, prop: "lineStyle" | "headEnd" | "headStart" | "color", newValue: string) {
+        this.arrow = arrow;
+        this.prop = prop;
+        this.oldValue = arrow[prop] as string;
+        this.newValue = newValue;
+    }
+
+    execute(): void {
+        (this.arrow as Record<string, unknown>)[this.prop] = this.newValue;
+    }
+
+    undo(): void {
+        (this.arrow as Record<string, unknown>)[this.prop] = this.oldValue;
+    }
+}
+
+/**
+ * Command: Edit an arrow's label text.
+ */
+export class EditArrowLabelCommand implements Command {
+    readonly description = "Edit arrow label";
+    private arrow: Arrow;
+    private oldLabel: string;
+    private newLabel: string;
+
+    constructor(arrow: Arrow, oldLabel: string, newLabel: string) {
+        this.arrow = arrow;
+        this.oldLabel = oldLabel;
+        this.newLabel = newLabel;
+    }
+
+    execute(): void {
+        this.arrow.label = this.newLabel;
+    }
+
+    undo(): void {
+        this.arrow.label = this.oldLabel;
+    }
+}
