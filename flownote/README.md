@@ -1,73 +1,79 @@
-# React + TypeScript + Vite
+# FlowNote
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An infinite whiteboard built from scratch with React and the HTML Canvas API. This project explores the core engineering concepts behind apps like Miro, tldraw, and Excalidraw — camera transforms, canvas rendering, interaction handling, and performance optimization — all without high-level canvas libraries.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Infinite canvas** — pan and zoom with no boundaries
+- **Zoom-to-cursor** — scroll wheel zooms anchored to the mouse position
+- **Draggable items** — click to select, drag to move
+- **World-space grid** — infinite grid that scales with zoom
+- **Frustum culling** — only visible items are rendered
+- **HiDPI support** — crisp rendering on Retina / high-DPI displays
+- **Debug HUD** — live FPS, zoom level, and world coordinates
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+| Layer     | Choice                |
+|-----------|-----------------------|
+| Framework | React 19              |
+| Language  | TypeScript 5.9        |
+| Bundler   | Vite 8                |
+| Rendering | HTML Canvas 2D API    |
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+**Prerequisites:** Node.js 18+ and a package manager (npm, yarn, pnpm, or bun).
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+```bash
+# Clone and install
+git clone <repo-url>
+cd flownote
+npm install
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Start dev server
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Project Structure
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+src/
+├── Components/
+│   └── FlowCanvas.tsx        # Core canvas component (lifecycle, render loop, events)
+├── rendering/
+│   ├── grid.ts                # World-space grid drawing
+│   ├── hud.ts                 # Screen-space debug HUD
+│   └── debug.ts               # Origin axes & cursor crosshair
+├── utils/
+│   ├── camera.ts              # Camera math (screen↔world, zoom)
+│   └── hitTest.ts             # Item hit-testing
+├── types.ts                   # Shared type definitions
+├── App.tsx                    # App root
+├── main.tsx                   # Entry point
+└── index.css                  # Global styles
+```
+
+## Controls
+
+| Action        | Input                          |
+|---------------|--------------------------------|
+| Pan           | Click + drag on empty space    |
+| Zoom          | Scroll wheel                   |
+| Select item   | Click on a colored square      |
+| Drag item     | Click + drag on a selected item|
+
+## Learning
+
+See the [`/docs`](./docs/) folder for in-depth write-ups on the engineering concepts behind this project:
+
+1. [Infinite Canvas & Camera System](./docs/01-infinite-canvas.md)
+2. [Canvas Rendering Pipeline](./docs/02-canvas-rendering.md)
+3. [Interaction System](./docs/03-interaction-system.md)
+4. [Performance Techniques](./docs/04-performance.md)
+
+## License
+
+MIT
