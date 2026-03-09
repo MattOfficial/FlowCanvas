@@ -2,6 +2,22 @@
   "name": "@flownote/diagram-core",
   "version": "0.1.0",
   "description": "Framework-agnostic diagram domain logic for FlowNote-style editors.",
+  "keywords": [
+    "diagram",
+    "canvas",
+    "whiteboard",
+    "typescript",
+    "flownote"
+  ],
+  "homepage": "https://github.com/MattOfficial/FlowCanvas#readme",
+  "bugs": {
+    "url": "https://github.com/MattOfficial/FlowCanvas/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MattOfficial/FlowCanvas.git",
+    "directory": "packages/diagram-core"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -18,11 +34,21 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --config ../../vitest.config.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
-    "@flownote/command-history": "workspace:*",
-    "@flownote/core-geometry": "workspace:*"
+    "@flownote/command-history": "^0.1.0",
+    "@flownote/core-geometry": "^0.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
   },
   "license": "MIT"
 }
+

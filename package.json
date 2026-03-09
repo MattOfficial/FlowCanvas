@@ -7,8 +7,23 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "npm run dev --workspace flownote",
+    "changeset": "changeset",
+    "version:packages": "changeset version",
+    "publish:packages": "changeset publish --tag latest",
     "build:packages": "npm run build --workspace @flownote/core-geometry && npm run build --workspace @flownote/command-history && npm run build --workspace @flownote/diagram-core",
+    "test:packages": "npm run test --workspace @flownote/core-geometry && npm run test --workspace @flownote/command-history && npm run test --workspace @flownote/diagram-core",
+    "pack:dry-run": "npm pack --dry-run --workspace @flownote/core-geometry --workspace @flownote/command-history --workspace @flownote/diagram-core",
+    "smoke:consumer": "node ./scripts/smoke-consumer.mjs",
+    "verify:packages": "npm run build:packages && npm run test:packages && npm run pack:dry-run && npm run smoke:consumer",
+    "release:packages": "npm run version:packages && npm run verify:packages && npm run publish:packages",
     "build": "npm run build:packages && npm run build --workspace flownote",
     "lint": "npm run lint --workspace flownote"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.5.1",
+    "@changesets/cli": "^2.29.7",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

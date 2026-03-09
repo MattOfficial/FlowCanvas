@@ -57,7 +57,6 @@ The project focuses on systems-level frontend engineering: custom camera math, a
 ## Local Development
 
 ```bash
-cd flownote
 npm install
 npm run dev
 ```
@@ -90,10 +89,26 @@ Open `http://localhost:5173`.
 ## Build
 
 ```bash
-cd flownote
 npm run build
-npm run preview
+npm run preview --workspace flownote
 ```
+
+## Package Release Workflow
+
+From repo root:
+
+```bash
+# validate package build/test/pack + local consumer compile
+npm run verify:packages
+
+# add release notes entry for changed packages
+npm run changeset
+
+# apply version/changelog updates from pending changesets
+npm run version:packages
+```
+
+Publishing is done via the manual GitHub Actions workflow `Release Packages` (`workflow_dispatch`) using `NPM_TOKEN`.
 
 ## License
 

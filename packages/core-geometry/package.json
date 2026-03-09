@@ -2,6 +2,22 @@
   "name": "@flownote/core-geometry",
   "version": "0.1.0",
   "description": "Framework-agnostic camera transforms and geometry helpers for canvas apps.",
+  "keywords": [
+    "geometry",
+    "canvas",
+    "diagramming",
+    "typescript",
+    "flownote"
+  ],
+  "homepage": "https://github.com/MattOfficial/FlowCanvas#readme",
+  "bugs": {
+    "url": "https://github.com/MattOfficial/FlowCanvas/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MattOfficial/FlowCanvas.git",
+    "directory": "packages/core-geometry"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -18,7 +34,17 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --config ../../vitest.config.ts",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
   },
   "license": "MIT"
 }
+
