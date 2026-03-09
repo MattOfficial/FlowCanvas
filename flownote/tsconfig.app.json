@@ -15,6 +15,12 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@flownote/core-geometry": ["../packages/core-geometry/src/index.ts"],
+      "@flownote/command-history": ["../packages/command-history/src/index.ts"],
+      "@flownote/diagram-core": ["../packages/diagram-core/src/index.ts"]
+    },
 
     /* Linting */
     "strict": true,

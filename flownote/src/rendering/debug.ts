@@ -6,7 +6,7 @@
  * transform.
  */
 
-import type { Point } from "../types";
+import type { Point } from "@flownote/core-geometry";
 
 /**
  * Draws the origin axes — a red horizontal (X) and green vertical (Y)
@@ -52,3 +52,4 @@ export function drawCrosshair(
     ctx.lineWidth = 2 / zoom;
     ctx.stroke();
 }
+

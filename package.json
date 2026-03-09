@@ -1,0 +1,14 @@
+{
+  "name": "flownote-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "flownote",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:packages": "npm run build --workspace @flownote/core-geometry && npm run build --workspace @flownote/command-history && npm run build --workspace @flownote/diagram-core",
+    "build": "npm run build:packages && npm run build --workspace flownote",
+    "lint": "npm run lint --workspace flownote"
+  }
+}

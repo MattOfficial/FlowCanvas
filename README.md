@@ -43,10 +43,14 @@ The project focuses on systems-level frontend engineering: custom camera math, a
 .
 |-- README.md                     # Portfolio showcase (this file)
 |-- docs/                         # Engineering deep dives
+|-- packages/                     # Reusable framework-agnostic packages
+|   |-- core-geometry/            # Camera + geometry primitives
+|   |-- command-history/          # Generic command undo/redo engine
+|   `-- diagram-core/             # Diagram domain logic + commands
 `-- flownote/                     # Main application
     |-- src/Components/           # Canvas surface + UI overlays
     |-- src/rendering/            # Grid, items, arrows, HUD, debug renderers
-    |-- src/utils/                # Camera math, hit-testing, history, commands, storage
+    |-- src/utils/                # App-local helpers (e.g., persistence)
     `-- package.json
 ```
 

@@ -6,7 +6,7 @@
  * clean look at extreme zoom-out.
  */
 
-import type { Camera } from "../types";
+import type { Camera } from "@flownote/core-geometry";
 
 /** Default spacing between grid dots in world-space pixels. */
 const DEFAULT_GRID_SIZE = 50;
@@ -72,3 +72,4 @@ export function drawGrid(
     }
     ctx.fill();
 }
+

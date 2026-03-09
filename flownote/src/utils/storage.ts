@@ -6,7 +6,8 @@
  * avoid excessive serialization on every frame or drag event.
  */
 
-import type { Arrow, Camera, Item } from "../types";
+import type { Camera } from "@flownote/core-geometry";
+import type { DiagramArrow as Arrow, DiagramItem as Item } from "@flownote/diagram-core";
 
 const STORAGE_KEY = "flownote-canvas";
 
@@ -76,3 +77,4 @@ export function createDebouncedSave(delayMs: number = 500) {
         }, delayMs);
     };
 }
+

@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@flownote/command-history": "workspace:*",
+    "@flownote/core-geometry": "workspace:*",
+    "@flownote/diagram-core": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

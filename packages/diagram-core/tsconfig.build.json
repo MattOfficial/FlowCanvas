@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@flownote/core-geometry": [
+        "../core-geometry/dist/index.d.ts"
+      ],
+      "@flownote/command-history": [
+        "../command-history/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
+}

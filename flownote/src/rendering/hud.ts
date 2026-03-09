@@ -5,7 +5,7 @@
  * on top of the canvas, independent of the camera transform.
  */
 
-import type { Point } from "../types";
+import type { Point } from "@flownote/core-geometry";
 
 /**
  * Draws the debug HUD in the top-right corner of the viewport.
@@ -31,3 +31,4 @@ export function drawHUD(
         85,
     );
 }
+

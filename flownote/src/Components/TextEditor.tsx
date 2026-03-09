@@ -7,7 +7,9 @@
  */
 
 import { useEffect, useRef } from "react";
-import type { Camera, Item } from "../types";
+import { worldToScreen } from "@flownote/core-geometry";
+import type { Camera } from "@flownote/core-geometry";
+import type { DiagramItem as Item } from "@flownote/diagram-core";
 import "./TextEditor.css";
 
 type TextEditorProps = {
@@ -16,18 +18,6 @@ type TextEditorProps = {
     onCommit: (newText: string) => void;
     onCancel: () => void;
 };
-
-/**
- * Converts an item's world-space bounds to screen-space pixel coordinates.
- */
-function worldToScreen(item: Item, camera: Camera) {
-    return {
-        left: item.x * camera.z + camera.x,
-        top: item.y * camera.z + camera.y,
-        width: item.width * camera.z,
-        height: item.height * camera.z,
-    };
-}
 
 export const TextEditor = ({ item, camera, onCommit, onCancel }: TextEditorProps) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -42,7 +32,13 @@ export const TextEditor = ({ item, camera, onCommit, onCancel }: TextEditorProps
         }
     }, []);
 
-    const screen = worldToScreen(item, camera);
+    const topLeft = worldToScreen(item.x, item.y, camera);
+    const screen = {
+        left: topLeft.x,
+        top: topLeft.y,
+        width: item.width * camera.z,
+        height: item.height * camera.z,
+    };
 
     const fontSize = Math.max(12, Math.min(16, item.height * 0.1)) * camera.z;
     const isDark = item.type === "sticky";

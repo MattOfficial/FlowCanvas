@@ -6,8 +6,10 @@
  * into: Select, Basic Shapes, and Diagram Shapes.
  */
 
-import type { ToolMode } from "../types";
+import type { ItemType } from "@flownote/diagram-core";
 import "./Toolbar.css";
+
+type ToolMode = "select" | "arrow" | ItemType;
 
 type ToolbarProps = {
     activeTool: ToolMode;

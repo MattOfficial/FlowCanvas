@@ -20,11 +20,17 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { Arrow, Camera, DragMode, Item, ItemType, Point, ResizeHandle, ToolMode } from "../types";
-import { screenToWorld, getVisibleBounds, zoomAtPoint } from "../utils/camera";
-import { hitTestItems } from "../utils/hitTest";
-import { History } from "../utils/history";
+import type { Camera, Point, ResizeHandle } from "@flownote/core-geometry";
+import { getVisibleBounds, lerp, screenToWorld, zoomAtPoint } from "@flownote/core-geometry";
+import { History } from "@flownote/command-history";
+import type { DiagramArrow as Arrow, DiagramItem as Item, ItemType } from "@flownote/diagram-core";
 import {
+  computeMarqueeSelection,
+  computeResize,
+  duplicateItems,
+  hitTestArrows,
+  hitTestItems,
+  nudgeSelection,
   CreateItemCommand,
   MoveItemCommand,
   DeleteItemCommand,
@@ -37,17 +43,20 @@ import {
   DeleteArrowCommand,
   ChangeArrowStyleCommand,
   EditArrowLabelCommand,
-} from "../utils/commands";
+} from "@flownote/diagram-core";
 import { loadState, createDebouncedSave } from "../utils/storage";
 import { drawGrid } from "../rendering/grid";
 import { drawHUD } from "../rendering/hud";
 import { drawOriginAxes, drawCrosshair } from "../rendering/debug";
 import { drawItem, drawSelectionHighlight, drawResizeHandles, hitTestResizeHandle, RESIZE_CURSORS } from "../rendering/items";
-import { drawArrow, drawArrowPreview, hitTestArrows } from "../rendering/arrows";
+import { drawArrow, drawArrowPreview } from "../rendering/arrows";
 import { Toolbar } from "./Toolbar";
 import { TextEditor } from "./TextEditor";
 import { ContextMenu, type ContextMenuAction } from "./ContextMenu";
 import { ColorPicker } from "./ColorPicker";
+
+type ToolMode = "select" | "arrow" | ItemType;
+type DragMode = "camera" | "item" | "resize" | "marquee" | "arrow";
 
 /** Interpolation speed for smooth zoom (0–1, higher = snappier). */
 const ZOOM_LERP_SPEED = 0.15;
@@ -80,11 +89,6 @@ const SHAPE_COLOR = "rgba(255, 255, 255, 0.08)";
 /** Nudge distance in world pixels (normal / with Shift). */
 const NUDGE_NORMAL = 10;
 const NUDGE_FINE = 1;
-
-/** Linear interpolation between two values. */
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
 
 export const FlowCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -291,34 +295,11 @@ export const FlowCanvas = () => {
         const item = items.current.find((i) => i.id === primarySelectedId.current);
         if (item) {
           const orig = resizeOrigin.current;
-          const handle = activeHandle.current;
-          const wx = cursor.current.x;
-          const wy = cursor.current.y;
-
-          let newX = item.x, newY = item.y, newW = item.width, newH = item.height;
-
-          if (handle === "se") {
-            newW = Math.max(MIN_ITEM_SIZE, wx - orig.x);
-            newH = Math.max(MIN_ITEM_SIZE, wy - orig.y);
-          } else if (handle === "sw") {
-            newW = Math.max(MIN_ITEM_SIZE, (orig.x + orig.w) - wx);
-            newH = Math.max(MIN_ITEM_SIZE, wy - orig.y);
-            newX = (orig.x + orig.w) - newW;
-          } else if (handle === "ne") {
-            newW = Math.max(MIN_ITEM_SIZE, wx - orig.x);
-            newH = Math.max(MIN_ITEM_SIZE, (orig.y + orig.h) - wy);
-            newY = (orig.y + orig.h) - newH;
-          } else if (handle === "nw") {
-            newW = Math.max(MIN_ITEM_SIZE, (orig.x + orig.w) - wx);
-            newH = Math.max(MIN_ITEM_SIZE, (orig.y + orig.h) - wy);
-            newX = (orig.x + orig.w) - newW;
-            newY = (orig.y + orig.h) - newH;
-          }
-
-          item.x = newX;
-          item.y = newY;
-          item.width = newW;
-          item.height = newH;
+          const resized = computeResize(orig, activeHandle.current, cursor.current, MIN_ITEM_SIZE);
+          item.x = resized.x;
+          item.y = resized.y;
+          item.width = resized.width;
+          item.height = resized.height;
         }
       } else if (dragModeRef.current === "marquee") {
         marqueeEnd.current = { ...cursor.current };
@@ -384,26 +365,12 @@ export const FlowCanvas = () => {
         }
 
         if (dragModeRef.current === "marquee") {
-          // Finalize marquee: select items within the rectangle
-          const x1 = Math.min(marqueeStart.current.x, marqueeEnd.current.x);
-          const y1 = Math.min(marqueeStart.current.y, marqueeEnd.current.y);
-          const x2 = Math.max(marqueeStart.current.x, marqueeEnd.current.x);
-          const y2 = Math.max(marqueeStart.current.y, marqueeEnd.current.y);
-
-          // Only select if we actually dragged a meaningful area
-          if (Math.abs(x2 - x1) > 2 || Math.abs(y2 - y1) > 2) {
-            const newSelection = new Set<number>();
-            for (const item of items.current) {
-              // Item intersects the rectangle
-              if (
-                item.x + item.width > x1 &&
-                item.x < x2 &&
-                item.y + item.height > y1 &&
-                item.y < y2
-              ) {
-                newSelection.add(item.id);
-              }
-            }
+          const newSelection = computeMarqueeSelection(
+            items.current,
+            marqueeStart.current,
+            marqueeEnd.current,
+          );
+          if (newSelection) {
             selectedIds.current = newSelection;
             primarySelectedId.current = newSelection.size > 0
               ? [...newSelection][newSelection.size - 1]
@@ -560,21 +527,19 @@ export const FlowCanvas = () => {
       // Duplicate: Ctrl+D
       if (e.ctrlKey && e.key === "d" && selectedIds.current.size > 0) {
         e.preventDefault();
-        const offset = 20;
-        const newIds = new Set<number>();
-        const toDuplicate = items.current.filter((i) => selectedIds.current.has(i.id));
-        for (const orig of toDuplicate) {
-          const dup: Item = {
-            ...orig,
-            id: nextId.current++,
-            x: orig.x + offset,
-            y: orig.y + offset,
-          };
-          history.current.push(new CreateItemCommand(items.current, dup));
-          newIds.add(dup.id);
+        const result = duplicateItems(
+          items.current,
+          selectedIds.current,
+          () => nextId.current++,
+          20,
+        );
+        for (const duplicate of result.duplicates) {
+          history.current.push(new CreateItemCommand(items.current, duplicate));
         }
-        selectedIds.current = newIds;
-        primarySelectedId.current = newIds.size > 0 ? [...newIds][newIds.size - 1] : null;
+        selectedIds.current = result.selectedIds;
+        primarySelectedId.current = result.selectedIds.size > 0
+          ? [...result.selectedIds][result.selectedIds.size - 1]
+          : null;
         triggerSave();
         return;
       }
@@ -592,20 +557,7 @@ export const FlowCanvas = () => {
         if (e.key === "ArrowLeft") dx = -dist;
         if (e.key === "ArrowRight") dx = dist;
 
-        const entries: { item: Item; oldX: number; oldY: number; newX: number; newY: number }[] = [];
-        for (const item of items.current) {
-          if (selectedIds.current.has(item.id)) {
-            entries.push({
-              item,
-              oldX: item.x,
-              oldY: item.y,
-              newX: item.x + dx,
-              newY: item.y + dy,
-            });
-            item.x += dx;
-            item.y += dy;
-          }
-        }
+        const entries = nudgeSelection(items.current, selectedIds.current, dx, dy);
         if (entries.length === 1) {
           const en = entries[0];
           history.current.push(new MoveItemCommand(en.item, en.oldX, en.oldY, en.newX, en.newY));
@@ -935,21 +887,19 @@ export const FlowCanvas = () => {
         label,
         shortcut: "Ctrl+D",
         action: () => {
-          const offset = 20;
-          const newIds = new Set<number>();
-          const toDup = items.current.filter((i) => selectedIds.current.has(i.id));
-          for (const orig of toDup) {
-            const dup: Item = {
-              ...orig,
-              id: nextId.current++,
-              x: orig.x + offset,
-              y: orig.y + offset,
-            };
-            history.current.push(new CreateItemCommand(items.current, dup));
-            newIds.add(dup.id);
+          const result = duplicateItems(
+            items.current,
+            selectedIds.current,
+            () => nextId.current++,
+            20,
+          );
+          for (const duplicate of result.duplicates) {
+            history.current.push(new CreateItemCommand(items.current, duplicate));
           }
-          selectedIds.current = newIds;
-          primarySelectedId.current = newIds.size > 0 ? [...newIds][newIds.size - 1] : null;
+          selectedIds.current = result.selectedIds;
+          primarySelectedId.current = result.selectedIds.size > 0
+            ? [...result.selectedIds][result.selectedIds.size - 1]
+            : null;
           triggerSave();
         },
       });

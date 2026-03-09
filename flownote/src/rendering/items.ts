@@ -7,7 +7,8 @@
  * to already be applied to the context.
  */
 
-import type { Item, ResizeHandle } from "../types";
+import type { ResizeHandle } from "@flownote/core-geometry";
+import type { DiagramItem as Item } from "@flownote/diagram-core";
 
 /** Corner radius for sticky notes (world-space pixels). */
 const STICKY_RADIUS = 8;
