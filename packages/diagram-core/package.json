@@ -1,6 +1,6 @@
 {
   "name": "@flownote/diagram-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic diagram domain logic for FlowNote-style editors.",
   "keywords": [
     "diagram",
@@ -39,8 +39,8 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@flownote/command-history": "^0.1.0",
-    "@flownote/core-geometry": "^0.1.0"
+    "@flownote/command-history": "^0.2.0",
+    "@flownote/core-geometry": "^0.2.0"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -51,4 +51,3 @@
   },
   "license": "MIT"
 }
-

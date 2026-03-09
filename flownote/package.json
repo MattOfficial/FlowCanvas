@@ -1,7 +1,7 @@
 {
   "name": "flownote",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,9 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@flownote/command-history": "^0.1.0",
-    "@flownote/core-geometry": "^0.1.0",
-    "@flownote/diagram-core": "^0.1.0",
+    "@flownote/command-history": "^0.2.0",
+    "@flownote/core-geometry": "^0.2.0",
+    "@flownote/diagram-core": "^0.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

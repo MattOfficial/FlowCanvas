@@ -1,6 +1,6 @@
 {
   "name": "@flownote/command-history",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic command-pattern undo/redo history manager.",
   "keywords": [
     "undo",
@@ -48,4 +48,3 @@
   },
   "license": "MIT"
 }
-
